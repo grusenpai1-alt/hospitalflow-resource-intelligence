@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Activity, Bed, Check, ClipboardCheck, Clock3, Sparkles, Users } from 'lucide-react';
 import { useFirebaseSession } from '../context/FirebaseSessionContext';
 import { useFacilityData } from '../context/FacilityDataContext';
+import { canManageBedWorkflows } from '../services/workflowAccess';
 import './OccupancyWorkspace.css';
 
 type BedStatus = 'Available' | 'Occupied' | 'Cleaning' | 'Awaiting approval';
@@ -75,8 +76,8 @@ export function OccupancyWorkspace() {
   const [board, , mutateBoard] = useFacilityData<OccupancyBoard>('bed-occupancy-board-v1', () => initialBoard);
   const [reviewReasons, setReviewReasons] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState('');
-  const canOperate = !!profile && ['admin', 'coordinator', 'operations', 'resource_manager', 'housekeeping'].includes(profile.role);
-  const canReview = !!profile && ['admin', 'coordinator'].includes(profile.role);
+  const canOperate = canManageBedWorkflows(profile?.role);
+  const canReview = canOperate;
   const available = board.beds.filter((bed) => bed.status === 'Available').length;
   const occupied = board.beds.filter((bed) => bed.status === 'Occupied').length;
   const cleaning = board.beds.filter((bed) => bed.status === 'Cleaning').length;

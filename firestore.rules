@@ -20,9 +20,45 @@ service cloud.firestore {
               'infection_control', 'viewer'];
     }
 
-    function canWriteFacility(facilityId) {
+    function hasFacilityRole(facilityId, roles) {
       return hasFacilityProfile(facilityId)
-        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role != 'viewer';
+        && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role in roles;
+    }
+
+    function canWriteWorkflow(facilityId, workflowId) {
+      return workflowId == 'bed-turnaround-cases-v1'
+        ? hasFacilityRole(facilityId, ['admin', 'coordinator'])
+        : workflowId == 'workflow-settings-v1'
+          ? hasFacilityRole(facilityId, ['admin', 'coordinator'])
+          : workflowId == 'bed-occupancy-board-v1'
+            ? hasFacilityRole(facilityId, ['admin', 'coordinator'])
+            : workflowId == 'hospital-flow-lab-reservations-v1'
+              ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'lab', 'resource_manager'])
+              : workflowId == 'hospital-flow-equipment-bookings-v1'
+                ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'operations', 'resource_manager', 'clinical', 'housekeeping'])
+                : workflowId == 'hospital-flow-camp-allocations-v1'
+                  ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'operations', 'resource_manager'])
+                  : workflowId == 'hospital-flow-pharmacy-v1'
+                    ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'pharmacy'])
+                    : workflowId == 'hospital-flow-trauma-bays-v1'
+                      ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'operations', 'clinical'])
+                      : workflowId == 'hospital-flow-clinicians-v1'
+                        ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'clinical', 'resource_manager'])
+                        : workflowId == 'hospital-flow-staff-coverage-v1'
+                          ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'operations', 'resource_manager'])
+                          : workflowId == 'hospital-flow-alerts-v1'
+                            ? hasFacilityRole(facilityId, [
+                                'admin', 'coordinator', 'operations', 'nurse', 'housekeeping', 'lab',
+                                'resource_manager', 'pharmacy', 'clinical', 'blood_bank', 'ambulance',
+                                'infection_control'
+                              ])
+                            : workflowId == 'hospital-flow-blood-bank-v1'
+                              ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'blood_bank', 'clinical'])
+                              : workflowId == 'hospital-flow-ambulance-arrivals-v1'
+                                ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'ambulance', 'operations'])
+                                : workflowId == 'hospital-flow-isolation-rooms-v1'
+                                  ? hasFacilityRole(facilityId, ['admin', 'coordinator', 'infection_control', 'clinical'])
+                                  : false;
     }
 
     function isSupportedWorkflow(workflowId) {
@@ -150,7 +186,7 @@ service cloud.firestore {
 
     match /facilities/{facilityId}/workflows/{workflowId} {
       allow read: if hasFacilityProfile(facilityId) && isSupportedWorkflow(workflowId);
-      allow create, update: if canWriteFacility(facilityId)
+      allow create, update: if canWriteWorkflow(facilityId, workflowId)
         && isValidWorkflowDocument(workflowId);
       allow delete: if false;
     }

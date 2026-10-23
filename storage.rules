@@ -16,9 +16,10 @@ service firebase.storage {
               'infection_control', 'viewer'];
     }
 
-    function canWriteFacility(facilityId) {
+    function canWriteBedEvidence(facilityId) {
       return hasFacilityProfile(facilityId)
-        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role != 'viewer';
+        && firestore.get(/databases/(default)/documents/users/$(request.auth.uid)).data.role
+          in ['admin', 'coordinator'];
     }
 
     function isIsoTimestamp(value) {
@@ -41,10 +42,10 @@ service firebase.storage {
 
     match /facilities/{facilityId}/bed-evidence/{caseId} {
       allow read: if hasFacilityProfile(facilityId);
-      allow create, update: if canWriteFacility(facilityId)
+      allow create, update: if canWriteBedEvidence(facilityId)
         && caseId.matches('^[a-zA-Z0-9_-]{1,100}$')
         && validPhoto(caseId);
-      allow delete: if canWriteFacility(facilityId);
+      allow delete: if canWriteBedEvidence(facilityId);
     }
 
     match /{object=**} {

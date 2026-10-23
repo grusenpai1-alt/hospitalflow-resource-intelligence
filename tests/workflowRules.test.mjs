@@ -19,6 +19,11 @@ import {
   validateStaffCount,
 } from '../src/services/workflowRules.ts';
 import { getScenarioRoute } from '../src/services/scenarioRouting.ts';
+import {
+  canAccessScenarioRoute,
+  canManageBedWorkflows,
+  canWriteWorkflowAsRole,
+} from '../src/services/workflowAccess.ts';
 
 test('lab reservations detect an occupied instrument slot and return the next open slot', () => {
   const reservations = [
@@ -175,4 +180,18 @@ test('scenario routing recognizes workflow paths and rejects unknown or nested r
   assert.equal(getScenarioRoute('/infection-control'), 'infection-control');
   assert.equal(getScenarioRoute('/not-a-workflow'), 'not-found');
   assert.equal(getScenarioRoute('/labs/nested'), 'not-found');
+});
+
+test('workflow write access is restricted by facility role', () => {
+  assert.equal(canWriteWorkflowAsRole('bed-turnaround-cases-v1', 'coordinator'), true);
+  assert.equal(canWriteWorkflowAsRole('bed-turnaround-cases-v1', 'nurse'), false);
+  assert.equal(canWriteWorkflowAsRole('bed-occupancy-board-v1', 'housekeeping'), false);
+  assert.equal(canManageBedWorkflows('coordinator'), true);
+  assert.equal(canManageBedWorkflows('housekeeping'), false);
+  assert.equal(canWriteWorkflowAsRole('hospital-flow-pharmacy-v1', 'pharmacy'), true);
+  assert.equal(canWriteWorkflowAsRole('hospital-flow-pharmacy-v1', 'nurse'), false);
+  assert.equal(canWriteWorkflowAsRole('hospital-flow-pharmacy-v1', 'viewer'), false);
+  assert.equal(canAccessScenarioRoute('pharmacy', 'pharmacy'), true);
+  assert.equal(canAccessScenarioRoute('pharmacy', 'nurse'), false);
+  assert.equal(canAccessScenarioRoute('home', 'viewer'), true);
 });

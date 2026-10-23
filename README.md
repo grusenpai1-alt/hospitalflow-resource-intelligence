@@ -158,7 +158,7 @@ All workflow records below are synthetic and stored under the signed-in facility
 
 The `/occupancy` workspace includes a synthetic ward bed board, occupancy metrics, cleaning crew assignment, cleaning completion, readiness review/re-clean transitions, and a recent activity feed. Changes are stored in the same facility-scoped Firestore workflow store as the other scenarios.
 
-Current limitations include coarse facility-wide write access for non-viewer roles (the UI role controls are not server authorization), synthetic/demo crew records, no staff/bed directory synchronization, and client-triggered photo retention checks. These workflows are not connected to a hospital information system or verified clinical source of truth.
+Firestore rules now enforce a workflow-by-workflow role matrix. Bed-turnaround cases and the occupancy approval board are writable only by admins and coordinators because their shared-document format cannot securely distinguish individual staff actions in rules. Other staff roles have access only to their assigned workflow groups. These controls are not operation-level authorization for every nested field; this prototype still uses synthetic/demo crew records, has no staff/bed directory synchronization, and relies on client-triggered photo retention checks. It is not connected to a hospital information system or verified clinical source of truth.
 
 ## 7. Architecture, Privacy & Integration Readiness
 

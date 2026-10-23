@@ -17,6 +17,7 @@ import {
   generateSyntheticBedPhotoBlob,
 } from '../services/storage';
 import { canApproveBedPhoto, canRejectBedPhoto } from '../services/workflowRules';
+import { canManageBedWorkflows } from '../services/workflowAccess';
 
 interface HospitalFlowContextType {
   cases: HospitalCase[];
@@ -106,6 +107,10 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // Resolve only after the facility-scoped Firestore transaction commits.
   const updateCases = useCallback(
     async (updater: (prev: HospitalCase[]) => HospitalCase[]): Promise<boolean> => {
+      if (!canManageBedWorkflows(profile?.role)) {
+        showNotification('error', 'Bed-case changes are restricted to facility administrators and coordinators.');
+        return false;
+      }
       try {
         await mutateCases((current) => ({
           next: updater(current),
@@ -120,12 +125,12 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return false;
       }
     },
-    [mutateCases, showNotification]
+    [mutateCases, profile?.role, showNotification]
   );
 
   // Periodic and on-load auto-purge check
   const runAutoPurge = useCallback(async () => {
-    if (!profile?.facilityId) return;
+    if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) return;
     try {
       const { purgedCaseIds, errors } = await cloudPhotoStorage.purgeExpiredPhotos(profile.facilityId);
 
@@ -171,7 +176,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (error) {
       showNotification('error', `Photo retention check failed: ${error instanceof Error ? error.message : 'Firebase Storage error.'}`);
     }
-  }, [profile?.facilityId, refreshStorageSummary, showNotification, updateCases]);
+  }, [profile?.facilityId, profile?.role, refreshStorageSummary, showNotification, updateCases]);
 
   // The first facility visit initializes records in Firestore through useFacilityData.
   useEffect(() => {
@@ -179,7 +184,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [cases]);
 
   useEffect(() => {
-    if (!profile?.facilityId) return;
+    if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) return;
     void refreshStorageSummary();
   }, [profile?.facilityId, refreshStorageSummary]);
 
@@ -213,7 +218,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         syntheticPhotoSeedInProgress.current.delete(item.id);
       });
     }
-  }, [cases, profile?.facilityId, refreshStorageSummary, showNotification]);
+  }, [cases, profile?.facilityId, profile?.role, refreshStorageSummary, showNotification]);
 
   // Periodic purge timer
   useEffect(() => {
@@ -720,8 +725,10 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
   // 10. Demo Simulation: Fast-Forward Time
   const simulateTimeFastForward = useCallback(
     async (hours: number): Promise<{ purgedCount: number; error?: string }> => {
-      if (!profile?.facilityId) {
-        const error = 'No facility photo-storage session is available.';
+      if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) {
+        const error = profile?.facilityId
+          ? 'Bed-retention controls are restricted to facility administrators and coordinators.'
+          : 'No facility photo-storage session is available.';
         showNotification('error', error);
         return { purgedCount: 0, error };
       }

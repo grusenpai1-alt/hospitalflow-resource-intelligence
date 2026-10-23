@@ -10,6 +10,7 @@ import {
   LogOut,
 } from 'lucide-react';
 import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { canManageBedWorkflows } from '../services/workflowAccess';
 
 interface HeaderProps {
   showBedActions: boolean;
@@ -26,7 +27,7 @@ export const Header: React.FC<HeaderProps> = ({
 }) => {
   const { storageSummary, resetToInitialDemoData, isProcessing } = useHospitalFlow();
   const { profile, signOutUser } = useFirebaseSession();
-  const canManageBeds = !!profile && ['admin', 'coordinator', 'operations'].includes(profile.role);
+  const canManageBeds = canManageBedWorkflows(profile?.role);
   const canManageSettings = !!profile && ['admin', 'coordinator'].includes(profile.role);
   const isAdmin = profile?.role === 'admin';
 

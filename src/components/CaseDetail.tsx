@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useHospitalFlow } from '../context/HospitalFlowContext';
 import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { canManageBedWorkflows } from '../services/workflowAccess';
 import type { HospitalCase } from '../types';
 import { cloudPhotoStorage } from '../services/cloudPhotoStorage';
 import { generateSyntheticBedPhotoBlob } from '../services/storage';
@@ -41,11 +42,12 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
   } = useHospitalFlow();
   const { profile } = useFirebaseSession();
   const role = profile?.role;
-  const canUpdateNursing = role === 'admin' || role === 'coordinator' || role === 'nurse';
-  const canUpdateBilling = role === 'admin' || role === 'coordinator' || role === 'operations';
-  const canConfirmDepartureRole = role === 'admin' || role === 'coordinator' || role === 'operations';
-  const canHousekeep = role === 'admin' || role === 'operations' || role === 'housekeeping';
-  const canReviewReadiness = role === 'admin' || role === 'coordinator';
+  const canManageBedCase = canManageBedWorkflows(role);
+  const canUpdateNursing = canManageBedCase;
+  const canUpdateBilling = canManageBedCase;
+  const canConfirmDepartureRole = canManageBedCase;
+  const canHousekeep = canManageBedCase;
+  const canReviewReadiness = canManageBedCase;
 
   const [photoObjectUrl, setPhotoObjectUrl] = useState<string | null>(null);
   const [photoLoading, setPhotoLoading] = useState<boolean>(false);
@@ -166,6 +168,11 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
 
   return (
     <div className="case-detail-container" role="main" aria-label={`Details for ${caseData.caseRef}`}>
+      {!canManageBedCase && (
+        <div className="workflow-role-notice" role="status">
+          Bed-case edits are restricted to facility administrators and coordinators.
+        </div>
+      )}
       {/* Detail Header */}
       <div className="detail-header-card">
         <div className="header-meta-row">

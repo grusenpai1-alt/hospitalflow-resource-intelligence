@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useFacilityData, useFacilityWorkflowSnapshot } from '../context/FacilityDataContext';
+import { useFirebaseSession } from '../context/FirebaseSessionContext';
 import {
   calculateCapacity,
   calculateEquipmentUtilization,
@@ -12,6 +13,7 @@ import {
   type LabReservation,
   type MaintenanceWindow,
 } from '../services/workflowRules';
+import { canAccessScenarioRoute } from '../services/workflowAccess';
 import DotGrid from './DotGrid';
 import {
   AlertTriangle,
@@ -732,6 +734,15 @@ function CampWorkspace() {
 }
 
 export function ScenarioWorkspace({ route }: { route: ScenarioRoute }) {
+  const { profile } = useFirebaseSession();
+  if (!canAccessScenarioRoute(route, profile?.role)) {
+    return (
+      <section className="scenario-workspace" aria-labelledby="access-denied-title">
+        <PageHeading eyebrow="ACCESS RESTRICTED" title="Your facility role is read-only here" description="Ask your facility administrator to grant the role required for this workflow." icon={ShieldCheck} />
+        <a className="btn btn-primary" href="/">Return to all workflows</a>
+      </section>
+    );
+  }
   if (route === 'home') return <ScenarioHome />;
   if (route === 'not-found') return (
     <section className="scenario-workspace" aria-labelledby="not-found-title">

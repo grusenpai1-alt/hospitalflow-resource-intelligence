@@ -7,7 +7,7 @@
 - Workflow state and settings are stored in facility-scoped Firestore documents under `facilities/{facilityId}/workflows/{workflowId}`.
 - Bed photo blobs are stored in facility-scoped Firebase Storage paths; download URLs and image bytes are not written into workflow records.
 - Firebase Email/Password Authentication gates access; trusted administrators provision user facility profiles at `users/{uid}`.
-- Firestore and Storage rules provide facility-scoped access and deny viewer writes. Non-viewer write permissions remain coarse-grained, and the browser is not trusted for authorization decisions.
+- Firestore and Storage rules provide facility-scoped access and enforce workflow-level write roles. Bed-case and occupancy-board writes are limited to admins/coordinators because those shared records combine operations with privileged approval actions. Other workflow documents still need per-operation authorization or a trusted backend before real use.
 - Existing localStorage/IndexedDB demo records are not migrated and the app has no browser-storage fallback.
 - No server API, ORM, or migration system is configured. Current validation, role enforcement, and photo retention are not production-grade.
 
