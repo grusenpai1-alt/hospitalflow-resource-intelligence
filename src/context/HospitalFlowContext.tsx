@@ -1,6 +1,6 @@
 import React, { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react';
 import { useFacilityData } from './FacilityDataContext';
-import { useFirebaseSession } from './FirebaseSessionContext';
+import { useDemoSession } from './DemoSessionContext';
 import type {
   HospitalCase,
   CaseStatus,
@@ -13,6 +13,7 @@ import { cloudPhotoStorage } from '../services/cloudPhotoStorage';
 import {
   DEFAULT_SETTINGS,
   getInitialSyntheticCases,
+  getInitialLocalDemoCases,
   generateCaseRef,
   generateSyntheticBedPhotoBlob,
 } from '../services/storage';
@@ -66,8 +67,9 @@ interface HospitalFlowContextType {
 const HospitalFlowContext = createContext<HospitalFlowContextType | undefined>(undefined);
 
 export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
-  const { profile } = useFirebaseSession();
-  const [cases, , mutateCases] = useFacilityData<HospitalCase[]>('bed-turnaround-cases-v1', getInitialSyntheticCases);
+  const { profile } = useDemoSession();
+  const getInitialCases = profile?.isLocalDemo ? getInitialLocalDemoCases : getInitialSyntheticCases;
+  const [cases, , mutateCases] = useFacilityData<HospitalCase[]>('bed-turnaround-cases-v1', getInitialCases);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [settings, setSettings] = useFacilityData<WorkflowSettings>('workflow-settings-v1', () => DEFAULT_SETTINGS);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -95,14 +97,14 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, []);
 
   const refreshStorageSummary = useCallback(async () => {
-    if (!profile?.facilityId) return;
+    if (!profile?.facilityId || profile.isLocalDemo) return;
     try {
       const summary = await cloudPhotoStorage.getStorageSummary(profile.facilityId);
       setStorageSummary(summary);
     } catch (error) {
       showNotification('error', `Could not load photo storage summary: ${error instanceof Error ? error.message : 'Firebase Storage error.'}`);
     }
-  }, [profile?.facilityId, showNotification]);
+  }, [profile?.facilityId, profile?.isLocalDemo, showNotification]);
 
   // Resolve only after the facility-scoped Firestore transaction commits.
   const updateCases = useCallback(
@@ -130,7 +132,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // Periodic and on-load auto-purge check
   const runAutoPurge = useCallback(async () => {
-    if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) return;
+    if (!profile?.facilityId || profile.isLocalDemo || !canManageBedWorkflows(profile.role)) return;
     try {
       const { purgedCaseIds, errors } = await cloudPhotoStorage.purgeExpiredPhotos(profile.facilityId);
 
@@ -176,7 +178,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } catch (error) {
       showNotification('error', `Photo retention check failed: ${error instanceof Error ? error.message : 'Firebase Storage error.'}`);
     }
-  }, [profile?.facilityId, profile?.role, refreshStorageSummary, showNotification, updateCases]);
+  }, [profile?.facilityId, profile?.isLocalDemo, profile?.role, refreshStorageSummary, showNotification, updateCases]);
 
   // The first facility visit initializes records in Firestore through useFacilityData.
   useEffect(() => {
@@ -184,12 +186,12 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
   }, [cases]);
 
   useEffect(() => {
-    if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) return;
+    if (!profile?.facilityId || profile.isLocalDemo || !canManageBedWorkflows(profile.role)) return;
     void refreshStorageSummary();
-  }, [profile?.facilityId, refreshStorageSummary]);
+  }, [profile?.facilityId, profile?.isLocalDemo, refreshStorageSummary]);
 
   useEffect(() => {
-    if (!profile?.facilityId) return;
+    if (!profile?.facilityId || profile.isLocalDemo) return;
     const candidates = cases.filter((item) =>
       item.id.startsWith('case-synth-') &&
       item.photoUploaded &&
@@ -218,7 +220,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         syntheticPhotoSeedInProgress.current.delete(item.id);
       });
     }
-  }, [cases, profile?.facilityId, profile?.role, refreshStorageSummary, showNotification]);
+  }, [cases, profile?.facilityId, profile?.isLocalDemo, profile?.role, refreshStorageSummary, showNotification]);
 
   // Periodic purge timer
   useEffect(() => {
@@ -416,6 +418,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     ): Promise<{ success: boolean; error?: string }> => {
       setIsProcessing(true);
       try {
+        if (profile?.isLocalDemo) throw new Error('Photo evidence uploads are disabled in local browser demo mode.');
         if (!profile?.facilityId) throw new Error('No facility photo-storage session is available.');
         if (file instanceof File) {
           const val = cloudPhotoStorage.validateFile(file);
@@ -485,7 +488,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [profile?.facilityId, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
+    [profile?.facilityId, profile?.isLocalDemo, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 7. Coordinator Approves Bed Ready
@@ -501,6 +504,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       setIsProcessing(true);
       try {
+        if (profile?.isLocalDemo) throw new Error('Photo evidence approvals are disabled in local browser demo mode.');
         const nowIso = new Date().toISOString();
         const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
@@ -559,7 +563,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [cases, profile?.facilityId, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
+    [cases, profile?.facilityId, profile?.isLocalDemo, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 8. Coordinator Requests Re-clean / Rejects Photo
@@ -578,6 +582,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
       setIsProcessing(true);
       try {
+        if (profile?.isLocalDemo) throw new Error('Photo evidence review is disabled in local browser demo mode.');
         const nowIso = new Date().toISOString();
 
         if (!profile?.facilityId) throw new Error('No facility photo-storage session is available.');
@@ -657,7 +662,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [cases, profile?.facilityId, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
+    [cases, profile?.facilityId, profile?.isLocalDemo, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 9. Demo-only Control: Delete Photo Now (Test 48h Retention Policy Immediately)
@@ -665,6 +670,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     async (caseId: string): Promise<{ success: boolean; error?: string }> => {
       const c = cases.find((item) => item.id === caseId);
       if (!c) return { success: false, error: 'Case not found' };
+      if (profile?.isLocalDemo) return { success: false, error: 'Photo evidence is unavailable in local browser demo mode.' };
 
       setIsProcessing(true);
       try {
@@ -719,12 +725,17 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [cases, profile?.facilityId, showNotification, updateCases, refreshStorageSummary]
+    [cases, profile?.facilityId, profile?.isLocalDemo, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 10. Demo Simulation: Fast-Forward Time
   const simulateTimeFastForward = useCallback(
     async (hours: number): Promise<{ purgedCount: number; error?: string }> => {
+      if (profile?.isLocalDemo) {
+        const error = 'Cloud photo-retention controls are unavailable in local browser demo mode.';
+        showNotification('info', error);
+        return { purgedCount: 0, error };
+      }
       if (!profile?.facilityId || !canManageBedWorkflows(profile.role)) {
         const error = profile?.facilityId
           ? 'Bed-retention controls are restricted to facility administrators and coordinators.'
@@ -784,7 +795,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { purgedCount: 0, error: message };
       }
     },
-    [profile?.facilityId, refreshStorageSummary, showNotification, updateCases]
+    [profile?.facilityId, profile?.isLocalDemo, profile?.role, refreshStorageSummary, showNotification, updateCases]
   );
 
   // 11. Update Settings
@@ -798,6 +809,15 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     try {
       if (!profile?.facilityId) throw new Error('No facility photo-storage session is available.');
       if (profile.role !== 'admin') throw new Error('Only a facility administrator can reset the synthetic demo data.');
+      if (profile.isLocalDemo) {
+        const freshCases = getInitialLocalDemoCases();
+        await mutateCases(() => ({ next: freshCases, result: undefined }));
+        setSettings(DEFAULT_SETTINGS);
+        setStorageSummary({ totalPhotos: 0, totalSizeBytes: 0, pendingCount: 0, approvedCount: 0 });
+        setActiveCaseId(freshCases[0]?.id ?? null);
+        showNotification('success', 'Local demo data reset in this browser.');
+        return;
+      }
       const freshCases = getInitialSyntheticCases();
       const case1Blob = generateSyntheticBedPhotoBlob(freshCases[0].caseRef, freshCases[0].bed);
       const case3Blob = generateSyntheticBedPhotoBlob(freshCases[2].caseRef, freshCases[2].bed);
@@ -830,7 +850,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } finally {
       setIsProcessing(false);
     }
-  }, [cases, mutateCases, profile?.facilityId, profile?.role, refreshStorageSummary, showNotification]);
+  }, [cases, mutateCases, profile?.facilityId, profile?.isLocalDemo, profile?.role, refreshStorageSummary, setSettings, showNotification]);
 
   return (
     <HospitalFlowContext.Provider

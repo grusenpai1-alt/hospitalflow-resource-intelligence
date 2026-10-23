@@ -1,11 +1,4 @@
 import {
-  doc,
-  onSnapshot,
-  runTransaction,
-  serverTimestamp,
-  type DocumentReference,
-} from 'firebase/firestore';
-import {
   createContext,
   useCallback,
   useContext,
@@ -17,8 +10,12 @@ import {
   type ReactNode,
   type SetStateAction,
 } from 'react';
-import { useFirebaseSession } from './FirebaseSessionContext';
-import { firestore } from '../services/firebase';
+import {
+  getLocalWorkflowStorageKey,
+  LOCAL_WORKFLOW_UPDATED_EVENT,
+  readLocalWorkflow,
+  writeLocalWorkflow,
+} from '../services/localWorkflowStorage';
 
 type DataStatus = { loading: boolean; error: string | null };
 type MutationResult<T, R> = { next: T; result: R; write?: boolean };
@@ -54,36 +51,31 @@ export function useFacilityDataStatus() {
   const entries = Object.entries(context.statuses);
   return {
     loading: entries.some(([, status]) => status.loading),
+    loadingKeys: entries.filter(([, status]) => status.loading).map(([key]) => key),
     errors: entries.flatMap(([key, status]) => status.error ? [{ key, message: status.error }] : []),
   };
 }
 
-function parseStoredData<T>(value: unknown): T {
-  if (Array.isArray(value) || (value !== null && typeof value === 'object')) return value as T;
-  throw new Error('The saved workflow data has an unsupported format.');
-}
-
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : 'Unexpected Firebase data error.';
+  return error instanceof Error ? error.message : 'Unexpected browser storage error.';
 }
 
 export function useFacilityData<T>(
   key: string,
   initialValue: () => T,
 ): [T, Dispatch<SetStateAction<T>>, FacilityMutator<T>] {
-  const { profile, user } = useFirebaseSession();
   const statusContext = useContext(FacilityDataStatusContext);
   if (!statusContext) throw new Error('useFacilityData must be used within FacilityDataStatusProvider.');
 
-  const [value, setValue] = useState<T>(initialValue);
-  const [status, setLocalStatus] = useState<DataStatus>({ loading: true, error: null });
   const initialValueRef = useRef(initialValue);
-  const facilityId = profile?.facilityId;
+  const [value, setValue] = useState<T>(initialValue);
+  const localValueRef = useRef(value);
+  const [status, setLocalStatus] = useState<DataStatus>({ loading: false, error: null });
+  useEffect(() => {
+    initialValueRef.current = initialValue;
+  }, [initialValue]);
   const setStatus = statusContext.setStatus;
-  const documentRef = useMemo<DocumentReference | null>(() => {
-    if (!firestore || !facilityId) return null;
-    return doc(firestore, 'facilities', facilityId, 'workflows', key);
-  }, [key, facilityId]);
+  const storageKey = getLocalWorkflowStorageKey(key);
 
   useEffect(() => {
     setStatus(key, status);
@@ -93,97 +85,62 @@ export function useFacilityData<T>(
   useEffect(() => {
     let active = true;
 
-    if (!firestore || !documentRef || !user) {
-      setLocalStatus({ loading: false, error: 'Firebase facility data is not available. Check setup and sign in again.' });
-      return () => { active = false; };
+    try {
+      const saved = readLocalWorkflow<T>(key);
+      const next = saved ?? initialValueRef.current();
+      if (saved === null) writeLocalWorkflow(key, next);
+      localValueRef.current = next;
+      setValue(next);
+      setLocalStatus({ loading: false, error: null });
+    } catch (error) {
+      setLocalStatus({ loading: false, error: errorMessage(error) });
     }
 
-    const db = firestore;
-    const unsubscribe = onSnapshot(documentRef, (snapshot) => {
+    const refreshFromStorage = () => {
       if (!active) return;
-      if (snapshot.exists()) {
-        try {
-          const stored = parseStoredData<T>(snapshot.data().data);
-          setValue(stored);
-          setLocalStatus({ loading: false, error: null });
-        } catch (error) {
-          setLocalStatus({ loading: false, error: errorMessage(error) });
-        }
-        return;
-      }
-
-      void runTransaction<T>(db, async (transaction) => {
-        const current = await transaction.get(documentRef);
-        if (current.exists()) return parseStoredData<T>(current.data().data);
-
-        const seed = initialValueRef.current();
-        if (!Array.isArray(seed) && (seed === null || typeof seed !== 'object')) {
-          throw new Error('Only structured workflow data can be initialized in Firestore.');
-        }
-        transaction.set(documentRef, {
-          data: seed,
-          updatedBy: user.uid,
-          updatedAt: serverTimestamp(),
-        });
-        return seed;
-      }).then((seeded) => {
-        if (!active) return;
-        setValue(seeded);
+      try {
+        const saved = readLocalWorkflow<T>(key);
+        if (saved === null) return;
+        localValueRef.current = saved;
+        setValue(saved);
         setLocalStatus({ loading: false, error: null });
-      }).catch((error: unknown) => {
-        if (active) setLocalStatus({ loading: false, error: errorMessage(error) });
-      });
-    }, (error) => {
-      if (active) setLocalStatus({ loading: false, error: errorMessage(error) });
-    });
+      } catch (error) {
+        setLocalStatus({ loading: false, error: errorMessage(error) });
+      }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === storageKey) refreshFromStorage();
+    };
+    const handleLocalUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ workflowId?: string }>).detail;
+      if (detail?.workflowId === key) refreshFromStorage();
+    };
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(LOCAL_WORKFLOW_UPDATED_EVENT, handleLocalUpdate);
 
     return () => {
       active = false;
-      unsubscribe();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(LOCAL_WORKFLOW_UPDATED_EVENT, handleLocalUpdate);
     };
-  }, [documentRef, user]);
+  }, [key, storageKey]);
 
   const mutate = useCallback<FacilityMutator<T>>(async <R,>(operation: (current: T) => MutationResult<T, R>) => {
-    if (!firestore || !documentRef || !user) {
-      const error = new Error('Cannot save workflow data without an authenticated facility session.');
-      setLocalStatus({ loading: false, error: error.message });
-      throw error;
-    }
-
-    const db = firestore;
     try {
-      let updatedValue: T | undefined;
-      const result = await runTransaction<R>(db, async (transaction) => {
-        const snapshot = await transaction.get(documentRef);
-        const current = snapshot.exists()
-          ? parseStoredData<T>(snapshot.data().data)
-          : initialValueRef.current();
-        const outcome = operation(current);
-        const next = outcome.next;
-
-        if (!Array.isArray(next) && (next === null || typeof next !== 'object')) {
-          throw new Error('Only structured workflow data can be saved in Firestore.');
-        }
-        if (outcome.write !== false) {
-          transaction.set(documentRef, {
-            data: next,
-            updatedBy: user.uid,
-            updatedAt: serverTimestamp(),
-          });
-          updatedValue = next;
-        } else {
-          updatedValue = current;
-        }
-        return outcome.result;
-      });
-      if (updatedValue !== undefined) setValue(updatedValue);
+      const current = readLocalWorkflow<T>(key) ?? localValueRef.current;
+      const outcome = operation(current);
+      if (outcome.write !== false) {
+        writeLocalWorkflow(key, outcome.next);
+        localValueRef.current = outcome.next;
+        setValue(outcome.next);
+      }
       setLocalStatus({ loading: false, error: null });
-      return result;
+      return outcome.result;
     } catch (error) {
       setLocalStatus({ loading: false, error: errorMessage(error) });
       throw error;
     }
-  }, [documentRef, user]);
+  }, [key]);
 
   const update = useCallback<Dispatch<SetStateAction<T>>>((nextValue) => {
     void mutate((current) => ({
@@ -198,19 +155,14 @@ export function useFacilityData<T>(
 }
 
 export function useFacilityWorkflowSnapshot<T>(key: string) {
-  const { profile, user } = useFirebaseSession();
   const statusContext = useContext(FacilityDataStatusContext);
   if (!statusContext) throw new Error('useFacilityWorkflowSnapshot must be used within FacilityDataStatusProvider.');
 
   const [value, setValue] = useState<T | null>(null);
-  const [status, setLocalStatus] = useState<DataStatus>({ loading: true, error: null });
-  const facilityId = profile?.facilityId;
+  const [status, setLocalStatus] = useState<DataStatus>({ loading: false, error: null });
   const statusKey = `overview:${key}`;
   const setStatus = statusContext.setStatus;
-  const documentRef = useMemo<DocumentReference | null>(() => {
-    if (!firestore || !facilityId) return null;
-    return doc(firestore, 'facilities', facilityId, 'workflows', key);
-  }, [facilityId, key]);
+  const storageKey = getLocalWorkflowStorageKey(key);
 
   useEffect(() => {
     setStatus(statusKey, status);
@@ -218,29 +170,30 @@ export function useFacilityWorkflowSnapshot<T>(key: string) {
   }, [setStatus, status, statusKey]);
 
   useEffect(() => {
-    let active = true;
-    if (!firestore || !documentRef || !user) {
-      setLocalStatus({ loading: false, error: 'Firebase facility data is not available. Check setup and sign in again.' });
-      return () => { active = false; };
-    }
-
-    const unsubscribe = onSnapshot(documentRef, (snapshot) => {
-      if (!active) return;
+    const refreshFromStorage = () => {
       try {
-        setValue(snapshot.exists() ? parseStoredData<T>(snapshot.data().data) : null);
+        setValue(readLocalWorkflow<T>(key));
         setLocalStatus({ loading: false, error: null });
       } catch (error) {
         setLocalStatus({ loading: false, error: errorMessage(error) });
       }
-    }, (error) => {
-      if (active) setLocalStatus({ loading: false, error: errorMessage(error) });
-    });
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (event.key === storageKey) refreshFromStorage();
+    };
+    const handleLocalUpdate = (event: Event) => {
+      const detail = (event as CustomEvent<{ workflowId?: string }>).detail;
+      if (detail?.workflowId === key) refreshFromStorage();
+    };
+    refreshFromStorage();
+    window.addEventListener('storage', handleStorage);
+    window.addEventListener(LOCAL_WORKFLOW_UPDATED_EVENT, handleLocalUpdate);
 
     return () => {
-      active = false;
-      unsubscribe();
+      window.removeEventListener('storage', handleStorage);
+      window.removeEventListener(LOCAL_WORKFLOW_UPDATED_EVENT, handleLocalUpdate);
     };
-  }, [documentRef, user]);
+  }, [key, storageKey]);
 
-  return { value, loading: status.loading };
+  return { value, loading: false };
 }

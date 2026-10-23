@@ -1,4 +1,4 @@
-import type { FacilityRole } from '../context/FirebaseSessionContext';
+import type { FacilityRole } from '../context/DemoSessionContext';
 import type { ScenarioRoute } from './scenarioRouting';
 
 const workflowRoles: Record<string, readonly FacilityRole[]> = {

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import type { FormEvent, ReactNode } from 'react';
 import { useFacilityData, useFacilityWorkflowSnapshot } from '../context/FacilityDataContext';
-import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { useDemoSession } from '../context/DemoSessionContext';
 import {
   calculateCapacity,
   calculateEquipmentUtilization,
@@ -734,7 +734,7 @@ function CampWorkspace() {
 }
 
 export function ScenarioWorkspace({ route }: { route: ScenarioRoute }) {
-  const { profile } = useFirebaseSession();
+  const { profile } = useDemoSession();
   if (!canAccessScenarioRoute(route, profile?.role)) {
     return (
       <section className="scenario-workspace" aria-labelledby="access-denied-title">

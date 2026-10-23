@@ -8,10 +8,10 @@ HospitalFlow is a responsive operational prototype designed for hospital room-tu
 
 - **Architecture:** Client-side Single Page Application built with **React 19 + TypeScript + Vite**.
 - **State Management & Persistence:**
-  - Workflow records are scoped to a facility in Firestore at `facilities/{facilityId}/workflows/{workflowId}`.
-  - Bed inspection images are stored in facility-scoped Firebase Storage; only workflow metadata is kept in Firestore.
-  - There is no browser-storage fallback or automatic migration of older localStorage/IndexedDB demo records.
-- **Identity:** Firebase Email/Password Authentication with administrator-provisioned facility profiles at `users/{uid}`. Self-registration and client-side role assignment are disabled.
+  - Workflow records are saved in versioned browser `localStorage`; they remain on this device/browser and are not synced to Firebase or other visitors.
+  - Firebase Authentication and Firestore are not used by the current demo UI. Bed-evidence upload and photo-retention controls are unavailable in local mode.
+  - Existing Firestore data is not downloaded or migrated into browser storage.
+- **Identity:** No sign-in or Firebase authorization is required for this local synthetic demo.
 - **UI & Palette:** Calm operational SaaS interface adhering to the specified design system:
   - Deep navy text (`#0f172a`, `#1e293b`)
   - Restrained teal action accents (`#0f766e`, `#0d9488`)
@@ -27,7 +27,9 @@ HospitalFlow is a responsive operational prototype designed for hospital room-tu
 ## 2. Operational & Security Boundaries
 
 > [!IMPORTANT]
-> **Prototype Data Boundary:** Use synthetic data only. Firebase Authentication and facility-scoped Firestore/Storage rules are implemented, but they do not make this prototype production-ready or suitable for patient, staff, or clinical data. Uploaded images are not inspected for people, records, screens, or other identifiers. Retention cleanup is client-triggered and is not a guaranteed server-side deletion schedule. Review [docs/security-and-privacy.md](./docs/security-and-privacy.md) before use.
+> **Prototype Data Boundary:** Use synthetic data only. Browser-local storage is editable and not protected by a server authorization boundary; it is not suitable for patient, staff, or clinical data. Data stays in the current browser and may be cleared by browser settings. Review [docs/security-and-privacy.md](./docs/security-and-privacy.md) before use.
+
+> **Local demo mode:** The app opens without credentials and saves synthetic workflows only in the current browser. It does not connect to Firebase Auth or Firestore and does not sync with other users/devices.
 
 ---
 
@@ -39,54 +41,34 @@ HospitalFlow is a responsive operational prototype designed for hospital room-tu
 
 ### Step-by-Step Instructions
 
-1. Create a Firebase project and Web App, enable **Email/Password** in Firebase Authentication, create a **Firestore Standard** database, and enable Firebase Storage. The repository currently targets project ID `hospital-flow-98023`; no cloud resources or accounts are provisioned automatically.
-
-2. In Firebase Authentication, create an account for each authorized demo user. From the Firebase Console or a trusted Admin SDK environment, provision a matching Firestore document at `users/{uid}`:
-   ```json
-   {
-     "facilityId": "demo-hospital",
-     "facilityName": "Demo Hospital",
-     "role": "admin"
-   }
-   ```
-   Use a role from the supported role list in `src/context/FirebaseSessionContext.tsx`. Never allow the browser to create or edit this document.
-
-3. From the project root, deploy the Firebase security rules after reviewing them:
-   ```powershell
-   npx firebase-tools deploy --only firestore:rules,storage
-   ```
-   The Firebase CLI must be installed/authenticated and pointed at the selected project. Rules are not emulator-tested as part of this repository's build.
-
-4. Open PowerShell and navigate to the project directory:
+1. Open PowerShell and navigate to the project directory:
    ```powershell
    cd "g:\hospital flow"
    ```
 
-5. Copy `.env.example` to `.env.local` and fill in the Firebase Web App values from Firebase Console → Project settings. The project ID should remain `hospital-flow-98023` unless the Firebase configuration and `.firebaserc` are intentionally changed. Keep `.env.local` out of source control.
-
-6. Install dependencies:
+2. Install dependencies:
    ```powershell
    npm install
    ```
 
-7. Start the Vite local development server:
+3. Start the Vite local development server:
    ```powershell
    npm run dev
    ```
 
-8. Open your browser and navigate to:
+4. Open your browser and navigate to:
    ```
    http://localhost:5173
    ```
    *(Or the port displayed in your terminal)*
 
-9. To build and preview production assets:
+5. To build and preview production assets:
    ```powershell
    npm run build
    npm run preview
    ```
 
-For a Vercel build, add the same `VITE_FIREBASE_*` values as project environment variables before deployment. Without them, the deployed app remains on the Firebase setup gate. Never add service-account credentials or other privileged keys to Vite variables.
+No Firebase project setup or `VITE_FIREBASE_*` environment variables are required for the local demo. Never add service-account credentials or other privileged keys to Vite variables.
 
 Run focused rules tests with `npm test`. The test script uses Node's built-in TypeScript stripping, so use Node.js 22.12 or newer.
 
@@ -94,26 +76,29 @@ Run focused rules tests with `npm test`. The test script uses Node's built-in Ty
 
 ## 4. Manual Walkthrough & Workflow Verification
 
-### Scenario A: Full Lifecycle from Creation to Bed Ready
-1. **Create Case:** Click the **`+ Create Case`** button in the top navigation. Note the random synthetic reference (`HF-XXXX`). Select an operational ward (e.g., `Ward 4B (Stepdown ICU)`), room, bed, and priority. Click **Create Turnaround Case**.
+### Scenario A: Local Demo Bed Turnaround
+1. **Create Case:** Click the **`+ Create Case`** button in the top navigation. Note the random synthetic reference (`HF-XXXX`). Select an operational ward (e.g., `Ward 4B (Stepdown ICU)`), room, bed, and priority. Click **Create Turnaround Case**. The case is saved only in this browser.
 2. **Complete Handoffs:** In the case detail panel:
    - Click **`Mark Complete`** on **Nursing Handoff** (confirms chart reconciliation).
    - Click **`Mark Complete`** on **Billing / TPA Clearance** (operational placeholder).
    - *(Note: Billing can also be toggled optional via the **Settings** modal).*
 3. **Confirm Departure:** Once handoffs are satisfied, the **`Confirm Room Departure & Start Housekeeping`** button becomes enabled. Click it. The previous occupant is recorded as departed, and the bed enters the Housekeeping queue.
-4. **Housekeeping Cleaning & Photo Upload:**
+4. **Housekeeping Cleaning:**
    - Under Step 3, note the prominent **Privacy Reminder Banner** (*"Frame only the room/bed area. Never photograph patients, healthcare workers, medical records, or screens"*).
    - Click **`Start Bed Sanitisation`**.
-   - Select a **synthetic demo image** or click **`Use Synthetic Room Photo (Demo)`** to generate an illustrative image and upload it to Firebase Storage. Do not use a real hospital photograph.
-5. **Coordinator Review:**
-   - The case transitions to **Awaiting Coordinator Approval**.
+   - Local demo mode stops at cleaning: photo evidence upload and coordinator approval are unavailable.
+
+The remaining photo evidence, approval, rejection, and retention walkthroughs below describe the role-based facility workflow. That login UI is temporarily unavailable; do not attempt those steps in the public guest session.
+
+### Scenario B: Role-Based Coordinator Review (Unavailable in Guest Mode)
+1. The case transitions to **Awaiting Coordinator Approval**.
    - Review the photo preview loaded from Firebase Storage, the capture timestamp, and the pending-review expiry countdown.
    - Click **`Approve Bed Ready`**.
    - The case status updates to **Bed Ready** with an approval seal.
    - An approval notice is posted in the **Operational Event History** containing the case reference, approver label (`Coordinator (Simulated)`), timestamp, and approved status (with **no photo URLs or binary bytes** in the log).
    - Retention countdown is automatically scheduled for **48 hours**.
 
-### Scenario B: Testing Rejection & Re-clean Workflow
+### Scenario C: Role-Based Rejection & Re-clean Workflow (Unavailable in Guest Mode)
 1. Select an active case in **Awaiting Coordinator Approval** (or upload a photo on a new case).
 2. Click **`Request Re-clean / New Photo`**.
 3. Select a rejection category (e.g., *"Linen unmade, wrinkled or stained"* or *"Privacy violation: Person, document, or monitor visible"*).
@@ -123,7 +108,7 @@ Run focused rules tests with `npm test`. The test script uses Node's built-in Ty
    - The case returns to **Re-clean Requested** state.
    - Housekeeping can upload a replacement photo.
 
-### Scenario C: Verifying 48-Hour Retention & Automatic Purge
+### Scenario D: Role-Based 48-Hour Retention & Automatic Purge (Unavailable in Guest Mode)
 1. Open a case marked **Bed Ready**.
 2. Observe the demo control button: **`Delete Photo Now (Demo Control)`**.
 3. Click **`Delete Photo Now (Demo Control)`**.
@@ -138,11 +123,11 @@ Run focused rules tests with `npm test`. The test script uses Node's built-in Ty
 
 ## 5. End-to-End Workflow Walkthroughs
 
-All workflow records below are synthetic and stored under the signed-in facility's Firestore workflow documents. The app does not sync with hospital systems. Directly open any route listed here or select it from the workflow navigation.
+All workflow records below are synthetic and stored in this browser's local storage. The app does not sync with Firebase or hospital systems. Directly open any route listed here or select it from the workflow navigation.
 
 1. **Lab availability (`/labs`)** — Choose an instrument, test, future date/time, and requesting department; reserve the slot. A conflicting reservation is rejected with the next available slot. Cancel a listed reservation to release it.
 2. **Equipment booking (`/equipment`)** — Select equipment and a time range to create a booking; overlapping bookings and active outage windows are rejected. Cancel bookings from the selected-date list. Report an outage with a reason and start/end time, then restore it when service is available. Utilization is shown against the displayed date's 08:00–16:00 shift hours after outages.
-3. **Clinic beds (`/beds`)** — Create a synthetic case; complete required handoffs; confirm departure; start cleaning; submit only a synthetic image (JPEG, PNG, or WebP, up to 10 MB) or generate one; then approve or request re-clean with a reason. Pending images use the configured expiry (7 days by default); approved images use a fixed 48-hour expiry. The browser-triggered purge and Firebase Storage deletion are not a guaranteed server-side retention schedule.
+3. **Clinic beds (`/beds`)** — In local demo mode, create a synthetic case; complete handoffs; confirm departure; and start cleaning. Evidence uploads, coordinator review, and cloud retention controls are unavailable.
 4. **Bed occupancy (`/occupancy`)** — Move a bed from occupied to cleaning, assign an on-shift crew member not assigned elsewhere, finish cleaning, and approve readiness. Coordinators can request re-clean with a reason. The board records status activity and updates capacity counts.
 5. **Health camp (`/camps`)** — Allocate synthetic resource units. At 80% capacity the interface warns; an allocation above the 120-unit capacity is rejected without changing totals. Release an allocation to restore capacity.
 6. **Emergency pharmacy (`/pharmacy`)** — Search or filter supplies; record a signed whole-unit adjustment with a reason. Negative resulting stock is blocked. Low/critical state, last-updated time, and recent synthetic adjustment history recalculate from saved stock.
@@ -156,12 +141,12 @@ All workflow records below are synthetic and stored under the signed-in facility
 
 ## 6. Scope & Remaining Production Needs
 
-The `/occupancy` workspace includes a synthetic ward bed board, occupancy metrics, cleaning crew assignment, cleaning completion, readiness review/re-clean transitions, and a recent activity feed. Changes are stored in the same facility-scoped Firestore workflow store as the other scenarios.
+The `/occupancy` workspace includes a synthetic ward bed board, occupancy metrics, cleaning crew assignment, cleaning completion, readiness review/re-clean transitions, and a recent activity feed. Changes are stored in the same browser-local workflow store as the other scenarios.
 
-Firestore rules now enforce a workflow-by-workflow role matrix. Bed-turnaround cases and the occupancy approval board are writable only by admins and coordinators because their shared-document format cannot securely distinguish individual staff actions in rules. Other staff roles have access only to their assigned workflow groups. These controls are not operation-level authorization for every nested field; this prototype still uses synthetic/demo crew records, has no staff/bed directory synchronization, and relies on client-triggered photo retention checks. It is not connected to a hospital information system or verified clinical source of truth.
+The current local-only app does not enforce facility roles or connect to Firestore. Legacy Firebase rules remain in the repository but are not used by this UI. This prototype still uses synthetic/demo crew records and has no staff/bed directory synchronization or verified clinical source of truth.
 
 ## 7. Architecture, Privacy & Integration Readiness
 
 Repository reconnaissance, current limitations, and a staged path toward secure backend and ABDM sandbox work are documented in [`docs/architecture-assessment.md`](./docs/architecture-assessment.md), [`docs/security-and-privacy.md`](./docs/security-and-privacy.md), and the other readiness documents under [`docs/`](./docs/).
 
-HospitalFlow now requires Firebase sign-in and an administrator-provisioned profile when configured. It is **not** production-ready for patient data, ABDM-integrated, certified, or legally approved. See [docs/security-and-privacy.md](./docs/security-and-privacy.md) for the current implementation boundary and outstanding controls.
+HospitalFlow currently runs as a browser-local synthetic demo without Firebase authentication or cloud persistence. It is **not** production-ready for patient data, ABDM-integrated, certified, or legally approved. See [docs/security-and-privacy.md](./docs/security-and-privacy.md) for the current implementation boundary and outstanding controls.

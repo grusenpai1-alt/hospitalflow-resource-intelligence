@@ -1,18 +1,18 @@
 # HospitalFlow Architecture Assessment
 
-**Assessment date:** 2026-10-23
+**Assessment date:** 2026-10-24
 **Scope:** Repository state inspected in the current VS Code workspace. This is a code/configuration review, not a production penetration test or legal assessment.
 
 ## Current architecture
 
 - **Frontend:** React 19 + TypeScript, bundled with Vite 8; one client-rendered SPA.
 - **Routing:** `src/App.tsx` selects workflows from `window.location.pathname`; route names and UI are client-side.
-- **Application state:** React context for room-turnaround cases; local React state for resource workflows, synchronized to facility-scoped Firestore documents.
-- **Persistence:** Workflow records and settings in `facilities/{facilityId}/workflows/{workflowId}`; bed photos in facility-scoped Firebase Storage. Legacy browser-local data is not migrated or used as fallback.
+- **Application state:** React context for room-turnaround cases; local React state for resource workflows, persisted in versioned browser `localStorage`.
+- **Persistence:** Workflow records and settings remain only in the current browser profile; they are not synced to Firestore or other devices. Bed photo evidence is unavailable.
 - **Server/API:** No application API handlers or backend service were found in the inspected source. The app does not have server-side request validation or authorization.
-- **Database:** Firestore is configured for workflow state; there is no server API, ORM, or schema migration system. Security rules are initial safeguards and have not been validated in the Firebase Emulator Suite.
-- **Authentication/authorization:** Firebase Email/Password Auth and administrator-provisioned facility profiles are implemented. Rules scope access by facility and deny viewer writes, but all non-viewer roles can write every supported workflow document.
-- **Deployment:** Vercel project `hospital-flow`; Vite static build (`npm run build`). No Vercel Functions/API implementation or committed `vercel.json` was found. Deployment environment variables must be configured before Firebase-backed use.
+- **Database:** The current UI does not use Firestore or any server API, ORM, or migration system. Legacy rules remain in the repository for possible future use.
+- **Authentication/authorization:** No authentication or server authorization is used by the current UI. The demo role profile is client-side only and does not isolate users.
+- **Deployment:** Vercel project `hospital-flow`; Vite static build (`npm run build`). No Vercel Functions/API implementation or committed `vercel.json` was found. Firebase environment variables are not required for the current browser-only mode.
 
 ## Relevant files
 
@@ -20,7 +20,7 @@
 |---|---|
 | Application shell and route selection | `src/App.tsx`, `src/main.tsx` |
 | Room-turnaround state and operations | `src/context/HospitalFlowContext.tsx`, `src/types/index.ts` |
-| Firebase authentication and facility data | `src/context/FirebaseSessionContext.tsx`, `src/context/FacilityDataContext.tsx`, `src/services/firebase.ts` |
+| Local demo session and browser persistence | `src/context/DemoSessionContext.tsx`, `src/context/FacilityDataContext.tsx`, `src/services/localWorkflowStorage.ts` |
 | Firebase photo storage and synthetic seed data | `src/services/cloudPhotoStorage.ts`, `src/services/storage.ts` |
 | Firebase rules and project configuration | `firestore.rules`, `storage.rules`, `firebase.json`, `.firebaserc` |
 | Scenario workflows | `src/components/ScenarioWorkspace.tsx`, `src/components/EmergencyWorkspaces.tsx` |
@@ -29,7 +29,7 @@
 
 ## Existing features and dependencies
 
-The prototype includes bed-readiness coordination, labs, equipment, beds, camps, pharmacy, trauma, clinicians, staff, alerts, blood-bank availability, ambulance arrivals, isolation-room availability, and a bed occupancy/cleaning crew board. Workflow records use facility-scoped Firestore, and bed images use Firebase Storage. Seeded data and crew records are synthetic placeholders.
+The prototype includes bed-readiness coordination, labs, equipment, beds, camps, pharmacy, trauma, clinicians, staff, alerts, blood-bank availability, ambulance arrivals, isolation-room availability, and a bed occupancy/cleaning crew board. Workflow records use browser-local storage. Seeded data and crew records are synthetic placeholders.
 
 Runtime dependencies are React, React DOM, and Lucide icons. There is no database, authentication provider, API client, schema-validation library, or test runner in `package.json`.
 
@@ -37,17 +37,17 @@ Runtime dependencies are React, React DOM, and Lucide icons. There is no databas
 
 1. The browser loads a static Vite bundle from Vercel.
 2. React selects a workflow based on the URL path and renders its client-side UI.
-3. The user profile selects a facility path; workflow state is synchronized through Firestore and bed images through Firebase Storage.
-4. Firebase Security Rules gate facility-scoped reads and writes. They currently grant all non-viewer roles broad write access and do not fully validate nested payloads.
+3. Workflow state is loaded from and saved to versioned browser storage; no Firebase request is made for workflow data.
+4. Client-side UI role checks are not an authorization boundary; a visitor can modify local state.
 5. The Vercel static deployment does not provide an application API, granular role enforcement, scheduled retention, or live hospital-system synchronization.
 
 ## Authentication and authorization assessment
 
-Firebase Auth identifies the user and a read-only Firestore profile document assigns the facility and role. Firestore/Storage rules check facility membership and deny viewer writes. Client-side role checks only shape the UI; rules still grant broad workflow write access to every non-viewer. The app must not be used for real patient or ABHA data.
+The current browser-only UI has no Firebase Auth session or server-side role validation. Its local demo profile only controls which demo screens are shown; local data can be edited by the browser user. The app must not be used for real patient or ABHA data.
 
 ## Database and deployment assessment
 
-Firestore and Firebase Storage are configured as the prototype's shared data store, with initial facility-scoped security rules. These rules are not yet emulator-validated or verified against a provisioned cloud test account. Client-triggered photo cleanup is not authoritative retention enforcement. Production use of sensitive workflows requires granular server-enforced authorization, complete validation, scheduled retention, audit, monitoring, and recovery controls.
+Firestore and Firebase Storage rules are retained as legacy configuration and are not used by the current application flow. Production use of sensitive workflows requires granular server-enforced authorization, complete validation, scheduled retention, audit, monitoring, and recovery controls.
 
 The Vercel preview deployment completed with status READY on 2026-10-23. It was an isolated preview deployment. The production URL was not promoted or changed during this assessment.
 

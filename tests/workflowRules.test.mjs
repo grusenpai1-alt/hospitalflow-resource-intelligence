@@ -19,6 +19,12 @@ import {
   validateStaffCount,
 } from '../src/services/workflowRules.ts';
 import { getScenarioRoute } from '../src/services/scenarioRouting.ts';
+import { getInitialLocalDemoCases } from '../src/services/storage.ts';
+import {
+  getLocalWorkflowStorageKey,
+  readLocalWorkflow,
+  writeLocalWorkflow,
+} from '../src/services/localWorkflowStorage.ts';
 import {
   canAccessScenarioRoute,
   canManageBedWorkflows,
@@ -194,4 +200,44 @@ test('workflow write access is restricted by facility role', () => {
   assert.equal(canAccessScenarioRoute('pharmacy', 'pharmacy'), true);
   assert.equal(canAccessScenarioRoute('pharmacy', 'nurse'), false);
   assert.equal(canAccessScenarioRoute('home', 'viewer'), true);
+});
+
+test('local demo data never claims photo evidence that requires Firebase Storage', () => {
+  const cases = getInitialLocalDemoCases();
+  assert.ok(cases.length > 0);
+  for (const item of cases) {
+    assert.equal(item.photoUploaded, false);
+    assert.equal(item.photoPurged, false);
+    assert.equal(item.photoExpiresAt, undefined);
+    assert.ok(!['AWAITING_REVIEW', 'BED_READY'].includes(item.status));
+    assert.ok(item.events.every((event) =>
+      !['PHOTO_UPLOADED', 'APPROVAL_NOTICE', 'PHOTO_PURGED', 'PHOTO_EXPIRED'].includes(event.type)
+    ));
+  }
+});
+
+test('local workflow storage persists versioned structured data without Firebase', () => {
+  const values = new Map();
+  const listeners = new Map();
+  globalThis.window = {
+    localStorage: {
+      getItem: (key) => values.get(key) ?? null,
+      setItem: (key, value) => values.set(key, String(value)),
+    },
+    dispatchEvent: (event) => {
+      for (const listener of listeners.get(event.type) ?? []) listener(event);
+      return true;
+    },
+    addEventListener: (type, listener) => {
+      listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+    },
+    removeEventListener: () => {},
+  };
+
+  const key = getLocalWorkflowStorageKey('hospital-flow-example-v1');
+  assert.match(key, /^hospitalflow:browser-demo:v1:/);
+  assert.equal(readLocalWorkflow('hospital-flow-example-v1'), null);
+  const workflow = [{ id: 'sample', status: 'ready' }];
+  writeLocalWorkflow('hospital-flow-example-v1', workflow);
+  assert.deepEqual(readLocalWorkflow('hospital-flow-example-v1'), workflow);
 });

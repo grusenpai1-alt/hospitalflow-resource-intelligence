@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { Activity, Bed, Check, ClipboardCheck, Clock3, Sparkles, Users } from 'lucide-react';
-import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { useDemoSession } from '../context/DemoSessionContext';
 import { useFacilityData } from '../context/FacilityDataContext';
 import { canManageBedWorkflows } from '../services/workflowAccess';
 import './OccupancyWorkspace.css';
@@ -72,7 +72,7 @@ function formatTime(value: string) {
 }
 
 export function OccupancyWorkspace() {
-  const { profile } = useFirebaseSession();
+  const { profile } = useDemoSession();
   const [board, , mutateBoard] = useFacilityData<OccupancyBoard>('bed-occupancy-board-v1', () => initialBoard);
   const [reviewReasons, setReviewReasons] = useState<Record<string, string>>({});
   const [notice, setNotice] = useState('');

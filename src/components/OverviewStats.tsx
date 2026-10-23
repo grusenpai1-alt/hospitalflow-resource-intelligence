@@ -8,7 +8,7 @@ import {
 } from 'lucide-react';
 
 export const OverviewStats: React.FC = () => {
-  const { cases, storageSummary } = useHospitalFlow();
+  const { cases } = useHospitalFlow();
 
   const activeCases = cases.filter(
     (c) => c.status === 'HANDOFFS_PENDING' || c.status === 'CLEANING_IN_PROGRESS' || c.status === 'REJECTED_RECLEAN'
@@ -16,16 +16,6 @@ export const OverviewStats: React.FC = () => {
 
   const awaitingReview = cases.filter((c) => c.status === 'AWAITING_REVIEW').length;
   const bedsReady = cases.filter((c) => c.status === 'BED_READY').length;
-  const purgedPhotos = cases.filter((c) => c.photoPurged).length;
-
-  const formatBytes = (bytes: number) => {
-    if (bytes === 0) return '0 KB';
-    const k = 1024;
-    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
-  };
-
   return (
     <div className="stats-grid" role="region" aria-label="Operational Turnaround Summary">
       {/* 1. Active Workflow Cases */}
@@ -80,13 +70,13 @@ export const OverviewStats: React.FC = () => {
         </div>
         <div className="stat-content">
           <div className="stat-label-row">
-            <span className="stat-label">Firebase Storage Photos</span>
-            <span className="retention-rule-pill">48h / 7d Policy</span>
+            <span className="stat-label">Photo Evidence</span>
+            <span className="retention-rule-pill">Local demo</span>
           </div>
           <div className="stat-value-row">
-            <span className="stat-number">{storageSummary.totalPhotos}</span>
+            <span className="stat-number">Unavailable</span>
             <span className="stat-subtext">
-              Active ({formatBytes(storageSummary.totalSizeBytes)}) • {purgedPhotos} purged
+              Photo uploads and cloud retention are disabled
             </span>
           </div>
         </div>

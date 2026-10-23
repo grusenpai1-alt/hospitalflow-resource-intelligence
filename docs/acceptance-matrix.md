@@ -1,13 +1,13 @@
 # HospitalFlow workflow acceptance matrix
 
-All fixtures and example labels must be synthetic. Application state must remain facility-scoped in Firestore; photos must stay in the existing Firebase Storage path and must not be written to localStorage or logged.
+All fixtures and example labels must be synthetic. The current browser-only demo stores workflow state in versioned localStorage and does not use Firebase Auth or Firestore. Photo upload and review are unavailable.
 
 | Feature | Acceptance checks | Verification |
 |---|---|---|
-| Shared navigation and overview | Every registered path maps directly; active nav uses `aria-current`; unknown/nested paths show not-found; overview counts derive from workflow snapshots; mobile navigation remains usable. | Route helper tests passed; local direct-route smoke returned HTTP 200 for all route paths. The Firebase gate prevented authenticated workflow checks; setup-gate viewport had no horizontal overflow at 375px. |
+| Shared navigation and overview | Every registered path maps directly; active nav uses `aria-current`; unknown/nested paths show not-found; overview counts derive from local workflow snapshots; mobile navigation remains usable without sign-in. | Route helper tests; browser workflow verification |
 | Lab reservations | Instrument/date/time required; same slot cannot be reserved twice across transaction retries; conflict suggests the next available slot; reservations can be cancelled; metrics and table derive from saved state. | Business-rule tests; Firestore interaction not emulator-tested |
 | Equipment | Positive duration and valid time window required; overlaps and active maintenance block booking; outage requires reason/start/end; restore closes the outage; cancellation frees capacity; utilization is booked hours divided by available 08:00–16:00 shift hours for selected date. | Business-rule tests; Firestore interaction not emulator-tested |
-| Clinic beds and photos | Lifecycle/review guards; re-clean requires a reason; approved retention is fixed at 48 hours; pending expiry follows settings; purge handles repeated deletion and surfaces errors; event history excludes photo URLs/paths/bytes. Synthetic images only, with type/size validation and user warning. | Business-rule + controlled-clock tests; cloud deletion/manual UI not verified |
+| Clinic beds | Case lifecycle, handoffs, departure, and cleaning save locally; photo evidence and cloud retention controls are unavailable. | Workflow-rule tests; browser storage persistence test |
 | Occupancy and crew | Occupied → cleaning → awaiting approval → available; re-clean requires a reason; off-shift/already-assigned crew cannot be assigned twice; counts/activity update transactionally. | Build and code path review; Firestore interaction not emulator-tested |
 | Health camps | Capacity 120; warn at 80%; over-capacity blocked with no write; release restores capacity. | Business-rule tests; Firestore interaction not emulator-tested |
 | Pharmacy | Low/critical classification derives from par level; non-zero signed whole-unit adjustments require a reason; stock cannot go negative; timestamp/history update; search/status/category filters work. | Business-rule tests; UI/cloud interaction not manually verified |
@@ -23,9 +23,8 @@ All fixtures and example labels must be synthetic. Application state must remain
 ## Boundaries and limitations
 
 - This is an operational demo, not a hospital source of truth or clinical decision-support system.
-- Firebase Authentication, administrator-provisioned facility profiles, Firestore rules, and facility-scoped records are existing architecture; no self-registration or client-side role assignment is added.
+- The current local demo does not authenticate users or provide role isolation; its profile is only a client-side UI convenience.
 - Browser/client-triggered cleanup is not a guaranteed server-side deletion schedule.
 - No real patient, staff, contact, identity, clinical, dispatch, or hospital-integration data may be entered.
-- Live Firebase and Storage behavior requires configured credentials, provisioned accounts, deployed rules, and authorized test data; local build/tests alone do not verify cloud rules.
-- The browser image picker cannot determine whether an image is synthetic; users are instructed to use synthetic images only. No real hospital photo should be requested or uploaded.
-- The direct-route smoke check could not exercise workflow pages because no configured Firebase sign-in/facility profile was available; each route displayed the setup gate. No authenticated workflow interaction was manually verified.
+- Local storage is mutable, device-local, and not backed up; the current flow does not read Firebase or existing Firestore data.
+- No image uploads are available in local demo mode.

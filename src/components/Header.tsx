@@ -7,9 +7,8 @@ import {
   Settings,
   PlusCircle,
   RefreshCw,
-  LogOut,
 } from 'lucide-react';
-import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { useDemoSession } from '../context/DemoSessionContext';
 import { canManageBedWorkflows } from '../services/workflowAccess';
 
 interface HeaderProps {
@@ -26,7 +25,7 @@ export const Header: React.FC<HeaderProps> = ({
   onOpenSettings,
 }) => {
   const { storageSummary, resetToInitialDemoData, isProcessing } = useHospitalFlow();
-  const { profile, signOutUser } = useFirebaseSession();
+  const { profile } = useDemoSession();
   const canManageBeds = canManageBedWorkflows(profile?.role);
   const canManageSettings = !!profile && ['admin', 'coordinator'].includes(profile.role);
   const isAdmin = profile?.role === 'admin';
@@ -42,7 +41,7 @@ export const Header: React.FC<HeaderProps> = ({
           <div className="brand-text">
             <div className="brand-title-row">
               <h1 className="brand-title">HospitalFlow</h1>
-              <span className="demo-badge">SYNTHETIC DEMO</span>
+              <span className="demo-badge">{profile?.isLocalDemo ? 'LOCAL BROWSER DEMO' : 'SYNTHETIC DEMO'}</span>
             </div>
             <p className="brand-subtitle">
               Hospital Resource Coordination • India Prototype
@@ -51,9 +50,9 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Operational Safeguard Banner */}
-        <div className="pii-guard-pill" title="Synthetic demo only. Do not enter real patient or staff data or upload real photos.">
+        <div className="pii-guard-pill" title="Demo data is stored only in this browser. Use synthetic data only.">
           <ShieldAlert className="guard-icon" />
-          <span className="guard-text">Synthetic Demo Only • No Real Patient Data</span>
+          <span className="guard-text">Local Browser Data • Synthetic Only • Not Shared</span>
         </div>
 
         {/* Global Action Buttons */}
@@ -69,7 +68,7 @@ export const Header: React.FC<HeaderProps> = ({
               <span>Create Case</span>
             </button>
 
-            {isAdmin && <button
+            {isAdmin && !profile?.isLocalDemo && <button
               type="button"
               className="btn btn-secondary"
               onClick={onOpenSimulation}
@@ -98,22 +97,18 @@ export const Header: React.FC<HeaderProps> = ({
               type="button"
               className="btn btn-ghost"
               onClick={() => {
-                if (window.confirm('Reset the synthetic bed-turnaround cases and photos for this facility?')) {
+                if (window.confirm('Reset the local synthetic bed-turnaround demo data in this browser?')) {
                   resetToInitialDemoData();
                 }
               }}
               disabled={isProcessing}
-              title="Reset synthetic bed-turnaround cases and photos"
+              title="Reset local synthetic bed-turnaround demo data"
               aria-label="Reset bed turnaround demo data"
             >
               <RefreshCw className={`btn-icon ${isProcessing ? 'spin' : ''}`} />
               <span className="hide-on-tablet">Reset</span>
             </button>}
           </>}
-          <button type="button" className="btn btn-ghost" onClick={() => void signOutUser()} aria-label="Sign out">
-            <LogOut className="btn-icon" />
-            <span className="hide-on-tablet">Sign out</span>
-          </button>
         </div>
       </div>
     </header>

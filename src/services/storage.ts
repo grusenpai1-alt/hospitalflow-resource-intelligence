@@ -216,6 +216,23 @@ export function getInitialSyntheticCases(): HospitalCase[] {
   return [case1, case2, case3];
 }
 
+export function getInitialLocalDemoCases(): HospitalCase[] {
+  return getInitialSyntheticCases().map((caseData) => ({
+    ...caseData,
+    status: caseData.photoUploaded ? 'CLEANING_IN_PROGRESS' : caseData.status,
+    photoUploaded: false,
+    photoUploadedAt: undefined,
+    photoExpiresAt: undefined,
+    photoPurged: false,
+    photoPurgedAt: undefined,
+    approvedAt: undefined,
+    approverLabel: undefined,
+    events: caseData.events.filter((event) =>
+      !['PHOTO_UPLOADED', 'APPROVAL_NOTICE', 'PHOTO_PURGED', 'PHOTO_EXPIRED'].includes(event.type)
+    ),
+  }));
+}
+
 /**
  * Generate a synthetic demo hospital room photo blob (pure SVG drawing rendered onto a Blob)
  * so initial demo cases and sample uploads have a realistic, clean, synthetic bed image

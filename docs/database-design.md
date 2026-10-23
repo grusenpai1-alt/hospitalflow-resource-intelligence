@@ -1,15 +1,14 @@
 # Database Design Proposal
 
-**Status:** Firebase Authentication, Firestore, and Firebase Storage client integration and initial rules are configured for the synthetic-data prototype. This document is a conceptual proposal for any future patient-data system; it is not a migration or an approved clinical data model.
+**Status:** The current UI is a browser-only synthetic demo. Firebase Authentication and Firestore are not used for workflow access or persistence. This document is a conceptual proposal for a future patient-data system; it is not a migration or an approved clinical data model.
 
 ## Current storage
 
-- Workflow state and settings are stored in facility-scoped Firestore documents under `facilities/{facilityId}/workflows/{workflowId}`.
-- Bed photo blobs are stored in facility-scoped Firebase Storage paths; download URLs and image bytes are not written into workflow records.
-- Firebase Email/Password Authentication gates access; trusted administrators provision user facility profiles at `users/{uid}`.
-- Firestore and Storage rules provide facility-scoped access and enforce workflow-level write roles. Bed-case and occupancy-board writes are limited to admins/coordinators because those shared records combine operations with privileged approval actions. Other workflow documents still need per-operation authorization or a trusted backend before real use.
-- Existing localStorage/IndexedDB demo records are not migrated and the app has no browser-storage fallback.
-- No server API, ORM, or migration system is configured. Current validation, role enforcement, and photo retention are not production-grade.
+- Workflow records and settings are saved in versioned browser `localStorage`, scoped only by browser profile; there is no cloud sync or server-side authorization.
+- Firebase Auth/Firestore/Storage are not used by the current UI flow. Legacy rules and SDK dependencies remain for possible future integration but do not protect local browser data.
+- Bed-evidence upload and review are unavailable in local mode.
+- Browser-local demo data is mutable, may be cleared by browser settings, and is not backed up or migrated from Firestore.
+- No server API, ORM, or migration system is configured. Current validation and data integrity are not production-grade.
 
 ## Do not use current browser stores for patient data
 

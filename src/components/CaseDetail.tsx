@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { useHospitalFlow } from '../context/HospitalFlowContext';
-import { useFirebaseSession } from '../context/FirebaseSessionContext';
+import { useDemoSession } from '../context/DemoSessionContext';
 import { canManageBedWorkflows } from '../services/workflowAccess';
 import type { HospitalCase } from '../types';
 import { cloudPhotoStorage } from '../services/cloudPhotoStorage';
@@ -40,9 +40,10 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
     rejectBedPhoto,
     purgePhotoNow,
   } = useHospitalFlow();
-  const { profile } = useFirebaseSession();
+  const { profile } = useDemoSession();
   const role = profile?.role;
   const canManageBedCase = canManageBedWorkflows(role);
+  const isLocalDemo = profile?.isLocalDemo === true;
   const canUpdateNursing = canManageBedCase;
   const canUpdateBilling = canManageBedCase;
   const canConfirmDepartureRole = canManageBedCase;
@@ -62,6 +63,11 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
 
     async function loadPhoto() {
       if (!caseData.photoUploaded || caseData.photoPurged) {
+        setPhotoObjectUrl(null);
+        setPhotoLoadError(null);
+        return;
+      }
+      if (isLocalDemo) {
         setPhotoObjectUrl(null);
         setPhotoLoadError(null);
         return;
@@ -103,7 +109,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
         URL.revokeObjectURL(activeUrl);
       }
     };
-  }, [caseData.id, caseData.photoUploaded, caseData.photoPurged, caseData.photoUploadedAt, caseData.status, profile?.facilityId, storageSummary.totalPhotos]);
+  }, [caseData.id, caseData.photoUploaded, caseData.photoPurged, caseData.photoUploadedAt, caseData.status, isLocalDemo, profile?.facilityId, storageSummary.totalPhotos]);
 
   // Stepper calculations
   const getStepStatus = (stepIndex: number) => {
@@ -476,7 +482,11 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                 )}
 
                 {/* Photo Upload / Camera Controls */}
-                <div className="photo-upload-zone">
+                {isLocalDemo ? (
+                  <div className="workflow-role-notice" role="status">
+                    Bed-evidence uploads and approvals are unavailable in local demo mode.
+                  </div>
+                ) : <div className="photo-upload-zone">
                   <input
                     key={fileInputKey}
                     id="camera-file-input"
@@ -518,7 +528,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                   <span className="file-limits-caption">
                     Synthetic JPEG, PNG, or WebP only • Max 10MB • Stored in access-controlled facility Firebase Storage
                   </span>
-                </div>
+                </div>}
               </div>
             )}
           </section>
@@ -549,14 +559,21 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
 
             {/* Photo Preview Container */}
             <div className="photo-preview-viewport">
-              {photoLoading && (
+              {isLocalDemo && (
+                <div className="photo-state-box empty" role="status">
+                  <Camera className="state-icon muted" />
+                  <span className="empty-title">Evidence is disabled in guest mode</span>
+                  <p>Set up Firebase Storage to enable bed-photo review.</p>
+                </div>
+              )}
+              {!isLocalDemo && photoLoading && (
                 <div className="photo-state-box loading">
                   <div className="spinner" />
                   <span>Loading photo from facility storage...</span>
                 </div>
               )}
 
-              {photoLoadError && (
+              {!isLocalDemo && photoLoadError && (
                 <div className="photo-state-box error">
                   <AlertTriangle className="state-icon red" />
                   <span className="error-title">Storage Retrieval Error</span>
@@ -564,7 +581,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                 </div>
               )}
 
-              {caseData.photoPurged && (
+              {!isLocalDemo && caseData.photoPurged && (
                 <div className="photo-state-box purged" role="status">
                   <Trash2 className="state-icon muted" />
                   <span className="purged-title">Photo Permanently Purged</span>
@@ -577,7 +594,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                 </div>
               )}
 
-              {!photoLoading && !photoLoadError && !caseData.photoPurged && photoObjectUrl && (
+              {!isLocalDemo && !photoLoading && !photoLoadError && !caseData.photoPurged && photoObjectUrl && (
                 <div className="photo-image-frame">
                   <img
                     src={photoObjectUrl}
@@ -596,7 +613,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                 </div>
               )}
 
-              {!photoLoading &&
+              {!isLocalDemo && !photoLoading &&
                 !photoLoadError &&
                 !caseData.photoPurged &&
                 !photoObjectUrl &&
