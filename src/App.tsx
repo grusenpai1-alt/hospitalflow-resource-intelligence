@@ -13,8 +13,8 @@ import { SettingsModal } from './components/SettingsModal';
 import {
   ScenarioNavigation,
   ScenarioWorkspace,
-  type ScenarioRoute,
 } from './components/ScenarioWorkspace';
+import { getScenarioRoute } from './services/scenarioRouting';
 import {
   Bed,
   CheckCircle2,
@@ -24,14 +24,6 @@ import {
   ArrowLeft,
   Shield,
 } from 'lucide-react';
-
-function getScenarioRoute(pathname: string): ScenarioRoute {
-  const route = pathname.split('/').filter(Boolean)[0];
-  if (route === 'labs' || route === 'equipment' || route === 'beds' || route === 'occupancy' || route === 'camps' || route === 'pharmacy' || route === 'trauma' || route === 'clinicians' || route === 'staff' || route === 'alerts' || route === 'blood-bank' || route === 'ambulance' || route === 'infection-control') {
-    return route;
-  }
-  return 'home';
-}
 
 const HospitalFlowDashboard: React.FC = () => {
   const {

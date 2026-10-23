@@ -44,7 +44,7 @@ export const CreateCaseModal: React.FC<CreateCaseModalProps> = ({ isOpen, onClos
     setPreviewRef(generateCaseRef());
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setValidationError(null);
 
@@ -62,7 +62,7 @@ export const CreateCaseModal: React.FC<CreateCaseModalProps> = ({ isOpen, onClos
       return;
     }
 
-    createCase({
+    const created = await createCase({
       ward: finalWard,
       room: room.trim(),
       bed: bed.trim(),
@@ -70,7 +70,7 @@ export const CreateCaseModal: React.FC<CreateCaseModalProps> = ({ isOpen, onClos
       priority,
     });
 
-    onClose();
+    if (created) onClose();
   };
 
   return (

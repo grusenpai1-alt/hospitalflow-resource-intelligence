@@ -69,8 +69,7 @@ service cloud.firestore {
         && data.pendingPhotoExpiryDays >= 1
         && data.pendingPhotoExpiryDays <= 30
         && data.approvedPhotoRetentionHours is number
-        && data.approvedPhotoRetentionHours >= 1
-        && data.approvedPhotoRetentionHours <= 168
+        && data.approvedPhotoRetentionHours == 48
         && data.autoPurgeIntervalSeconds is number
         && data.autoPurgeIntervalSeconds >= 15
         && data.autoPurgeIntervalSeconds <= 3600;
@@ -88,11 +87,50 @@ service cloud.firestore {
         && data.events.size() <= 200;
     }
 
+    function isValidEquipmentData(data) {
+      return data is list && data.size() <= 500
+        || data is map
+          && data.keys().hasOnly(['bookings', 'outages'])
+          && data.keys().hasAll(['bookings', 'outages'])
+          && data.bookings is list
+          && data.bookings.size() <= 500
+          && data.outages is list
+          && data.outages.size() <= 500;
+    }
+
+    function isValidPharmacyData(data) {
+      return data is list && data.size() <= 500
+        || data is map
+          && data.keys().hasOnly(['items', 'events'])
+          && data.keys().hasAll(['items', 'events'])
+          && data.items is list
+          && data.items.size() <= 500
+          && data.events is list
+          && data.events.size() <= 200;
+    }
+
+    function isValidBloodBankData(data) {
+      return data is list && data.size() <= 500
+        || data is map
+          && data.keys().hasOnly(['products', 'events'])
+          && data.keys().hasAll(['products', 'events'])
+          && data.products is list
+          && data.products.size() <= 500
+          && data.events is list
+          && data.events.size() <= 200;
+    }
+
     function isValidWorkflowData(workflowId, data) {
       return workflowId == 'workflow-settings-v1'
         ? isValidSettings(data)
         : workflowId == 'bed-occupancy-board-v1'
           ? isValidOccupancyBoard(data)
+          : workflowId == 'hospital-flow-equipment-bookings-v1'
+            ? isValidEquipmentData(data)
+            : workflowId == 'hospital-flow-pharmacy-v1'
+              ? isValidPharmacyData(data)
+              : workflowId == 'hospital-flow-blood-bank-v1'
+                ? isValidBloodBankData(data)
           : data is list && data.size() <= 500;
     }
 

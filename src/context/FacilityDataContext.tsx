@@ -21,6 +21,8 @@ import { useFirebaseSession } from './FirebaseSessionContext';
 import { firestore } from '../services/firebase';
 
 type DataStatus = { loading: boolean; error: string | null };
+type MutationResult<T, R> = { next: T; result: R; write?: boolean };
+export type FacilityMutator<T> = <R>(mutate: (current: T) => MutationResult<T, R>) => Promise<R>;
 type StatusContextValue = {
   statuses: Record<string, DataStatus>;
   setStatus: (key: string, status: DataStatus | null) => void;
@@ -68,7 +70,7 @@ function errorMessage(error: unknown) {
 export function useFacilityData<T>(
   key: string,
   initialValue: () => T,
-): [T, Dispatch<SetStateAction<T>>] {
+): [T, Dispatch<SetStateAction<T>>, FacilityMutator<T>] {
   const { profile, user } = useFirebaseSession();
   const statusContext = useContext(FacilityDataStatusContext);
   if (!statusContext) throw new Error('useFacilityData must be used within FacilityDataStatusProvider.');
@@ -141,38 +143,104 @@ export function useFacilityData<T>(
     };
   }, [documentRef, user]);
 
-  const update = useCallback<Dispatch<SetStateAction<T>>>((nextValue) => {
+  const mutate = useCallback<FacilityMutator<T>>(async <R,>(operation: (current: T) => MutationResult<T, R>) => {
     if (!firestore || !documentRef || !user) {
-      setLocalStatus({ loading: false, error: 'Cannot save workflow data without an authenticated facility session.' });
-      return;
+      const error = new Error('Cannot save workflow data without an authenticated facility session.');
+      setLocalStatus({ loading: false, error: error.message });
+      throw error;
     }
 
     const db = firestore;
-    void runTransaction<T>(db, async (transaction) => {
-      const snapshot = await transaction.get(documentRef);
-      const current = snapshot.exists()
-        ? parseStoredData<T>(snapshot.data().data)
-        : initialValueRef.current();
-      const next = typeof nextValue === 'function'
-        ? (nextValue as (previous: T) => T)(current)
-        : nextValue;
+    try {
+      let updatedValue: T | undefined;
+      const result = await runTransaction<R>(db, async (transaction) => {
+        const snapshot = await transaction.get(documentRef);
+        const current = snapshot.exists()
+          ? parseStoredData<T>(snapshot.data().data)
+          : initialValueRef.current();
+        const outcome = operation(current);
+        const next = outcome.next;
 
-      if (!Array.isArray(next) && (next === null || typeof next !== 'object')) {
-        throw new Error('Only structured workflow data can be saved in Firestore.');
-      }
-      transaction.set(documentRef, {
-        data: next,
-        updatedBy: user.uid,
-        updatedAt: serverTimestamp(),
+        if (!Array.isArray(next) && (next === null || typeof next !== 'object')) {
+          throw new Error('Only structured workflow data can be saved in Firestore.');
+        }
+        if (outcome.write !== false) {
+          transaction.set(documentRef, {
+            data: next,
+            updatedBy: user.uid,
+            updatedAt: serverTimestamp(),
+          });
+          updatedValue = next;
+        } else {
+          updatedValue = current;
+        }
+        return outcome.result;
       });
-      return next;
-    }).then((next) => {
-      setValue(next);
+      if (updatedValue !== undefined) setValue(updatedValue);
       setLocalStatus({ loading: false, error: null });
-    }).catch((error: unknown) => {
+      return result;
+    } catch (error) {
       setLocalStatus({ loading: false, error: errorMessage(error) });
-    });
+      throw error;
+    }
   }, [documentRef, user]);
 
-  return [value, update];
+  const update = useCallback<Dispatch<SetStateAction<T>>>((nextValue) => {
+    void mutate((current) => ({
+      next: typeof nextValue === 'function'
+        ? (nextValue as (previous: T) => T)(current)
+        : nextValue,
+      result: undefined,
+    })).catch(() => undefined);
+  }, [mutate]);
+
+  return [value, update, mutate];
+}
+
+export function useFacilityWorkflowSnapshot<T>(key: string) {
+  const { profile, user } = useFirebaseSession();
+  const statusContext = useContext(FacilityDataStatusContext);
+  if (!statusContext) throw new Error('useFacilityWorkflowSnapshot must be used within FacilityDataStatusProvider.');
+
+  const [value, setValue] = useState<T | null>(null);
+  const [status, setLocalStatus] = useState<DataStatus>({ loading: true, error: null });
+  const facilityId = profile?.facilityId;
+  const statusKey = `overview:${key}`;
+  const setStatus = statusContext.setStatus;
+  const documentRef = useMemo<DocumentReference | null>(() => {
+    if (!firestore || !facilityId) return null;
+    return doc(firestore, 'facilities', facilityId, 'workflows', key);
+  }, [facilityId, key]);
+
+  useEffect(() => {
+    setStatus(statusKey, status);
+    return () => setStatus(statusKey, null);
+  }, [setStatus, status, statusKey]);
+
+  useEffect(() => {
+    let active = true;
+    if (!firestore || !documentRef || !user) {
+      setLocalStatus({ loading: false, error: 'Firebase facility data is not available. Check setup and sign in again.' });
+      return () => { active = false; };
+    }
+
+    const unsubscribe = onSnapshot(documentRef, (snapshot) => {
+      if (!active) return;
+      try {
+        setValue(snapshot.exists() ? parseStoredData<T>(snapshot.data().data) : null);
+        setLocalStatus({ loading: false, error: null });
+      } catch (error) {
+        setLocalStatus({ loading: false, error: errorMessage(error) });
+      }
+    }, (error) => {
+      if (active) setLocalStatus({ loading: false, error: errorMessage(error) });
+    });
+
+    return () => {
+      active = false;
+      unsubscribe();
+    };
+  }, [documentRef, user]);
+
+  return { value, loading: status.loading };
 }

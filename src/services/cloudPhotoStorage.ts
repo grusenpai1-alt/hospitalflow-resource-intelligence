@@ -10,6 +10,7 @@ import {
   type StorageReference,
 } from 'firebase/storage';
 import { firebaseStorage } from './firebase';
+import { isPhotoExpired } from './workflowRules';
 
 export interface PhotoRecord {
   caseId: string;
@@ -137,7 +138,7 @@ export const cloudPhotoStorage = {
     facilityId: string,
     caseId: string,
     expiresAt: string,
-    status: 'approved',
+    status: 'pending' | 'approved',
   ): Promise<{ success: boolean; error?: string }> {
     try {
       const objectRef = photoReference(facilityId, caseId);
@@ -181,7 +182,7 @@ export const cloudPhotoStorage = {
         const metadata = await getMetadata(objectRef);
         const expiresAt = metadata.customMetadata?.expiresAt;
         const caseId = metadata.customMetadata?.caseId ?? objectRef.name;
-        if (expiresAt && Number.isFinite(Date.parse(expiresAt)) && Date.parse(expiresAt) <= referenceTime.getTime()) {
+        if (isPhotoExpired(expiresAt, referenceTime.getTime())) {
           const deletion = await this.deletePhoto(facilityId, caseId);
           if (deletion.success) purgedCaseIds.push(caseId);
           else errors.push(`${caseId}: ${deletion.error ?? 'Storage deletion failed.'}`);

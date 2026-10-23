@@ -12,7 +12,6 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
 
   const [billingOptional, setBillingOptional] = useState(settings.billingOptional);
   const [pendingDays, setPendingDays] = useState(settings.pendingPhotoExpiryDays);
-  const [retentionHours, setRetentionHours] = useState(settings.approvedPhotoRetentionHours);
 
   if (!isOpen) return null;
 
@@ -21,7 +20,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
     updateSettings({
       billingOptional,
       pendingPhotoExpiryDays: Number(pendingDays) || 7,
-      approvedPhotoRetentionHours: Number(retentionHours) || 48,
+      approvedPhotoRetentionHours: 48,
     });
     onClose();
   };
@@ -74,25 +73,17 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
               </label>
             </div>
 
-            {/* Setting 2: Approved Photo Retention Period */}
+            {/* Approved retention is a fixed product policy. */}
             <div className="setting-row-input">
               <div className="setting-info">
-                <span className="setting-label">Approved Photo Retention (Hours)</span>
+                <span className="setting-label">Approved Photo Retention</span>
                 <p className="setting-desc">
-                  Time in hours after Coordinator approval before the bed verification photo is
-                  automatically deleted from facility Firebase Storage. Default is 48 hours.
+                  Approved bed photos are scheduled for deletion 48 hours after Coordinator approval.
+                  This retention period is fixed for the prototype.
                 </p>
               </div>
               <div className="setting-input-wrapper">
-                <input
-                  type="number"
-                  min={1}
-                  max={720}
-                  className="form-input number-input"
-                  value={retentionHours}
-                  onChange={(e) => setRetentionHours(Number(e.target.value))}
-                />
-                <span className="unit-label">hours</span>
+                <strong className="unit-label">48 hours</strong>
               </div>
             </div>
 

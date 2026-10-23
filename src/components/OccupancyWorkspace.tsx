@@ -1,4 +1,4 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Activity, Bed, Check, ClipboardCheck, Clock3, Sparkles, Users } from 'lucide-react';
 import { useFirebaseSession } from '../context/FirebaseSessionContext';
 import { useFacilityData } from '../context/FacilityDataContext';
@@ -72,7 +72,9 @@ function formatTime(value: string) {
 
 export function OccupancyWorkspace() {
   const { profile } = useFirebaseSession();
-  const [board, setBoard] = useFacilityData<OccupancyBoard>('bed-occupancy-board-v1', () => initialBoard);
+  const [board, , mutateBoard] = useFacilityData<OccupancyBoard>('bed-occupancy-board-v1', () => initialBoard);
+  const [reviewReasons, setReviewReasons] = useState<Record<string, string>>({});
+  const [notice, setNotice] = useState('');
   const canOperate = !!profile && ['admin', 'coordinator', 'operations', 'resource_manager', 'housekeeping'].includes(profile.role);
   const canReview = !!profile && ['admin', 'coordinator'].includes(profile.role);
   const available = board.beds.filter((bed) => bed.status === 'Available').length;
@@ -81,51 +83,81 @@ export function OccupancyWorkspace() {
   const awaitingApproval = board.beds.filter((bed) => bed.status === 'Awaiting approval').length;
   const events = useMemo(() => [...board.events].sort((a, b) => b.at.localeCompare(a.at)).slice(0, 10), [board.events]);
 
-  function updateBed(bedId: string, status: BedStatus, summary: string) {
+  async function updateBed(bedId: string, status: BedStatus, summary: string, reason = '') {
     const actor = profile?.role.replace('_', ' ') ?? 'Staff';
-    setBoard((current) => {
+    const timestamp = new Date().toISOString();
+    try {
+      const result = await mutateBoard((current) => {
       const bed = current.beds.find((item) => item.id === bedId);
-      if (!bed) return current;
+      const transitions: Record<BedStatus, BedStatus[]> = {
+        Available: ['Occupied'],
+        Occupied: ['Cleaning'],
+        Cleaning: ['Awaiting approval'],
+        'Awaiting approval': ['Available', 'Cleaning'],
+      };
+      if (!bed || !transitions[bed.status].includes(status) || (bed.status === 'Awaiting approval' && status === 'Cleaning' && !reason.trim())) {
+        return { next: current, result: false, write: false };
+      }
       const updated = { ...bed, status };
-      if (status === 'Cleaning') updated.cleaningStartedAt = new Date().toISOString();
+      if (status === 'Cleaning') updated.cleaningStartedAt = timestamp;
       if (status === 'Available' || status === 'Occupied') {
         updated.assignedCrewId = '';
         updated.cleaningStartedAt = undefined;
       }
-      const event = eventFor(updated, actor, summary);
+      const event = eventFor(updated, actor, reason.trim() ? `${summary} Reason: ${reason.trim()}` : summary);
       const activeAssignments = current.beds.filter((item) => item.id !== bedId && item.status === 'Cleaning').map((item) => item.assignedCrewId);
-      return {
-        ...current,
-        beds: current.beds.map((item) => item.id === bedId ? updated : item),
-        crew: current.crew.map((member) => ({
-          ...member,
-          status: member.status === 'Off shift' ? 'Off shift' : activeAssignments.includes(member.id) || (status === 'Cleaning' && updated.assignedCrewId === member.id) ? 'Assigned' : 'Available',
-        })),
-        events: [event, ...current.events].slice(0, 200),
-      };
-    });
+        return {
+          next: {
+            ...current,
+            beds: current.beds.map((item) => item.id === bedId ? updated : item),
+            crew: current.crew.map((member) => ({
+              ...member,
+              status: member.status === 'Off shift' ? 'Off shift' : activeAssignments.includes(member.id) || (status === 'Cleaning' && updated.assignedCrewId === member.id) ? 'Assigned' : 'Available',
+            })),
+            events: [event, ...current.events].slice(0, 200),
+          },
+          result: true,
+        };
+      });
+      setNotice(result ? 'Bed status updated.' : 'This transition is not valid or the required re-clean reason is missing.');
+    } catch (error) {
+      setNotice(`Bed status could not be saved: ${error instanceof Error ? error.message : 'Unexpected data error.'}`);
+    }
   }
 
-  function assignCrew(bedId: string, crewId: string) {
-    const member = board.crew.find((item) => item.id === crewId);
-    if (!member || member.status === 'Off shift') return;
-    setBoard((current) => {
+  async function assignCrew(bedId: string, crewId: string) {
+    const actor = profile?.role.replace('_', ' ') ?? 'Staff';
+    try {
+      const result = await mutateBoard((current) => {
       const bed = current.beds.find((item) => item.id === bedId);
-      if (!bed || bed.status !== 'Cleaning') return current;
+      const member = current.crew.find((item) => item.id === crewId);
+      const assignedElsewhere = current.beds.some((item) =>
+        item.id !== bedId && item.status === 'Cleaning' && item.assignedCrewId === crewId,
+      );
+      if (!bed || bed.status !== 'Cleaning' || !member || member.status === 'Off shift' || assignedElsewhere) {
+        return { next: current, result: false, write: false };
+      }
       const updated = { ...bed, assignedCrewId: crewId };
-      const event = eventFor(updated, profile?.role.replace('_', ' ') ?? 'Staff', `Cleaning assigned to ${member.name}.`);
+      const event = eventFor(updated, actor, `Cleaning assigned to ${member.name}.`);
       const activeAssignments = current.beds.filter((item) => item.id !== bedId && item.status === 'Cleaning').map((item) => item.assignedCrewId);
       activeAssignments.push(crewId);
       return {
-        ...current,
-        beds: current.beds.map((item) => item.id === bedId ? updated : item),
-        crew: current.crew.map((crewMember) => ({
-          ...crewMember,
-          status: crewMember.status === 'Off shift' ? 'Off shift' : activeAssignments.includes(crewMember.id) ? 'Assigned' : 'Available',
-        })),
-        events: [event, ...current.events].slice(0, 200),
+        next: {
+          ...current,
+          beds: current.beds.map((item) => item.id === bedId ? updated : item),
+          crew: current.crew.map((crewMember) => ({
+            ...crewMember,
+            status: crewMember.status === 'Off shift' ? 'Off shift' : activeAssignments.includes(crewMember.id) ? 'Assigned' : 'Available',
+          })),
+          events: [event, ...current.events].slice(0, 200),
+        },
+        result: true,
       };
-    });
+      });
+      setNotice(result ? 'Crew assignment saved.' : 'That crew member is off shift, assigned elsewhere, or the bed is no longer cleaning.');
+    } catch (error) {
+      setNotice(`Crew assignment could not be saved: ${error instanceof Error ? error.message : 'Unexpected data error.'}`);
+    }
   }
 
   return (
@@ -166,7 +198,7 @@ export function OccupancyWorkspace() {
                   {bed.status === 'Cleaning' && (
                     <div className="occupancy-assignment">
                       <label>Cleaning crew
-                        <select aria-label={`Cleaning crew for ${bed.id}`} value={bed.assignedCrewId} onChange={(event) => assignCrew(bed.id, event.target.value)} disabled={!canOperate}>
+                        <select aria-label={`Cleaning crew for ${bed.id}`} value={bed.assignedCrewId} onChange={(event) => void assignCrew(bed.id, event.target.value)} disabled={!canOperate}>
                           <option value="">Assign crew…</option>
                           {board.crew.map((member) => <option key={member.id} value={member.id} disabled={member.status === 'Off shift' || (member.status === 'Assigned' && member.id !== bed.assignedCrewId)}>{member.name} · {member.status === 'Off shift' ? 'off shift' : member.status === 'Assigned' && member.id !== bed.assignedCrewId ? 'assigned' : member.shift}</option>)}
                         </select>
@@ -175,14 +207,16 @@ export function OccupancyWorkspace() {
                     </div>
                   )}
                   <div className="occupancy-bed-actions">
-                    {bed.status === 'Occupied' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateBed(bed.id, 'Cleaning', 'Bed released for housekeeping cleaning.')} disabled={!canOperate}><Sparkles size={14} /> Send to cleaning</button>}
-                    {bed.status === 'Cleaning' && <button type="button" className="btn btn-primary btn-sm" onClick={() => updateBed(bed.id, 'Awaiting approval', 'Cleaning completed; bed queued for readiness review.')} disabled={!canOperate || !bed.assignedCrewId}><Check size={14} /> Finish cleaning</button>}
+                    {bed.status === 'Occupied' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => void updateBed(bed.id, 'Cleaning', 'Bed released for housekeeping cleaning.')} disabled={!canOperate}><Sparkles size={14} /> Send to cleaning</button>}
+                    {bed.status === 'Cleaning' && <button type="button" className="btn btn-primary btn-sm" onClick={() => void updateBed(bed.id, 'Awaiting approval', 'Cleaning completed; bed queued for readiness review.')} disabled={!canOperate || !bed.assignedCrewId}><Check size={14} /> Finish cleaning</button>}
                     {bed.status === 'Awaiting approval' && <>
-                      <button type="button" className="btn btn-primary btn-sm" onClick={() => updateBed(bed.id, 'Available', 'Bed readiness approved and marked available.')} disabled={!canReview}><ClipboardCheck size={14} /> Approve ready</button>
-                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateBed(bed.id, 'Cleaning', 'Readiness review requested additional cleaning.')} disabled={!canReview}>Re-clean</button>
+                      <button type="button" className="btn btn-primary btn-sm" onClick={() => void updateBed(bed.id, 'Available', 'Bed readiness approved and marked available.')} disabled={!canReview}><ClipboardCheck size={14} /> Approve ready</button>
+                      <label>Re-clean reason<input value={reviewReasons[bed.id] ?? ''} maxLength={120} onChange={(event) => setReviewReasons((current) => ({ ...current, [bed.id]: event.target.value }))} required /></label>
+                      <button type="button" className="btn btn-secondary btn-sm" onClick={() => void updateBed(bed.id, 'Cleaning', 'Readiness review requested additional cleaning.', reviewReasons[bed.id] ?? '')} disabled={!canReview || !reviewReasons[bed.id]?.trim()}>Re-clean</button>
                     </>}
-                    {bed.status === 'Available' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => updateBed(bed.id, 'Occupied', 'Bed marked occupied for operational capacity tracking.')} disabled={!canOperate}><Bed size={14} /> Mark occupied</button>}
+                    {bed.status === 'Available' && <button type="button" className="btn btn-secondary btn-sm" onClick={() => void updateBed(bed.id, 'Occupied', 'Bed marked occupied for operational capacity tracking.')} disabled={!canOperate}><Bed size={14} /> Mark occupied</button>}
                   </div>
+                  {notice && <p className="panel-footnote" role="status">{notice}</p>}
                 </article>
               );
             })}

@@ -16,6 +16,7 @@ import {
   generateCaseRef,
   generateSyntheticBedPhotoBlob,
 } from '../services/storage';
+import { canApproveBedPhoto, canRejectBedPhoto } from '../services/workflowRules';
 
 interface HospitalFlowContextType {
   cases: HospitalCase[];
@@ -37,11 +38,11 @@ interface HospitalFlowContextType {
     bed: string;
     bedType: string;
     priority: TurnaroundPriority;
-  }) => HospitalCase;
-  toggleNursingHandoff: (caseId: string) => void;
-  toggleBillingHandoff: (caseId: string) => void;
-  confirmRoomDeparture: (caseId: string) => void;
-  startCleaning: (caseId: string) => void;
+  }) => Promise<HospitalCase | null>;
+  toggleNursingHandoff: (caseId: string) => Promise<void>;
+  toggleBillingHandoff: (caseId: string) => Promise<void>;
+  confirmRoomDeparture: (caseId: string) => Promise<void>;
+  startCleaning: (caseId: string) => Promise<void>;
   uploadPhoto: (
     caseId: string,
     file: File | Blob,
@@ -65,7 +66,7 @@ const HospitalFlowContext = createContext<HospitalFlowContextType | undefined>(u
 
 export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { profile } = useFirebaseSession();
-  const [cases, setCases] = useFacilityData<HospitalCase[]>('bed-turnaround-cases-v1', getInitialSyntheticCases);
+  const [cases, , mutateCases] = useFacilityData<HospitalCase[]>('bed-turnaround-cases-v1', getInitialSyntheticCases);
   const [activeCaseId, setActiveCaseId] = useState<string | null>(null);
   const [settings, setSettings] = useFacilityData<WorkflowSettings>('workflow-settings-v1', () => DEFAULT_SETTINGS);
   const [isProcessing, setIsProcessing] = useState<boolean>(false);
@@ -102,12 +103,24 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     }
   }, [profile?.facilityId, showNotification]);
 
-  // Persist case updates to the facility-scoped Firestore document.
+  // Resolve only after the facility-scoped Firestore transaction commits.
   const updateCases = useCallback(
-    (updater: (prev: HospitalCase[]) => HospitalCase[]) => {
-      setCases(updater);
+    async (updater: (prev: HospitalCase[]) => HospitalCase[]): Promise<boolean> => {
+      try {
+        await mutateCases((current) => ({
+          next: updater(current),
+          result: undefined,
+        }));
+        return true;
+      } catch (error) {
+        showNotification(
+          'error',
+          `Bed workflow could not be saved: ${error instanceof Error ? error.message : 'Firebase data error.'}`
+        );
+        return false;
+      }
     },
-    [setCases]
+    [mutateCases, showNotification]
   );
 
   // Periodic and on-load auto-purge check
@@ -122,7 +135,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
       }
 
       if (purgedCaseIds.length > 0) {
-        updateCases((prevCases) =>
+        const saved = await updateCases((prevCases) =>
           prevCases.map((c) => {
             if (!purgedCaseIds.includes(c.id)) return c;
             const isPending = c.status === 'AWAITING_REVIEW';
@@ -147,6 +160,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
           })
         );
+        if (!saved) return;
 
         await refreshStorageSummary();
         showNotification(
@@ -215,7 +229,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 1. Create Case
   const createCase = useCallback(
-    ({
+    async ({
       ward,
       room,
       bed,
@@ -227,7 +241,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
       bed: string;
       bedType: string;
       priority: TurnaroundPriority;
-    }): HospitalCase => {
+    }): Promise<HospitalCase | null> => {
       const caseRef = generateCaseRef();
       const nowIso = new Date().toISOString();
 
@@ -259,7 +273,8 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         events: [newEvt],
       };
 
-      updateCases((prev) => [newCase, ...prev]);
+      const saved = await updateCases((prev) => [newCase, ...prev]);
+      if (!saved) return null;
       setActiveCaseId(newCase.id);
       showNotification('success', `Case ${caseRef} created successfully.`);
       return newCase;
@@ -269,9 +284,9 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 2. Toggle Nursing Handoff
   const toggleNursingHandoff = useCallback(
-    (caseId: string) => {
+    async (caseId: string) => {
       const nowIso = new Date().toISOString();
-      updateCases((prev) =>
+      await updateCases((prev) =>
         prev.map((c) => {
           if (c.id !== caseId) return c;
           const nextState = !c.nursingComplete;
@@ -299,9 +314,9 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 3. Toggle Billing / TPA Handoff
   const toggleBillingHandoff = useCallback(
-    (caseId: string) => {
+    async (caseId: string) => {
       const nowIso = new Date().toISOString();
-      updateCases((prev) =>
+      await updateCases((prev) =>
         prev.map((c) => {
           if (c.id !== caseId) return c;
           const nextState = !c.billingComplete;
@@ -329,9 +344,9 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 4. Confirm Room Departure (Starts Housekeeping)
   const confirmRoomDeparture = useCallback(
-    (caseId: string) => {
+    async (caseId: string) => {
       const nowIso = new Date().toISOString();
-      updateCases((prev) =>
+      const saved = await updateCases((prev) =>
         prev.map((c) => {
           if (c.id !== caseId) return c;
           if (c.departureConfirmed) return c;
@@ -354,16 +369,16 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
           };
         })
       );
-      showNotification('success', 'Room departure confirmed. Housekeeping notified.');
+      if (saved) showNotification('success', 'Room departure confirmed. Housekeeping notified.');
     },
     [showNotification, updateCases]
   );
 
   // 5. Housekeeping Starts Cleaning
   const startCleaning = useCallback(
-    (caseId: string) => {
+    async (caseId: string) => {
       const nowIso = new Date().toISOString();
-      updateCases((prev) =>
+      await updateCases((prev) =>
         prev.map((c) => {
           if (c.id !== caseId) return c;
           const evt: EventLog = {
@@ -420,7 +435,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         }
 
         // Update case state (strictly no photo bytes or URLs stored in case/events!)
-        updateCases((prev) =>
+        const saved = await updateCases((prev) =>
           prev.map((c) => {
             if (c.id !== caseId) return c;
             const evt: EventLog = {
@@ -443,6 +458,16 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
           })
         );
+        if (!saved) {
+          const cleanup = await cloudPhotoStorage.deletePhoto(profile.facilityId, caseId);
+          const message = cleanup.success
+            ? 'Case save failed; the uploaded photo was removed from storage.'
+            : `Case save failed and uploaded photo cleanup failed: ${cleanup.error ?? 'Storage error.'}`;
+          await refreshStorageSummary();
+          showNotification('error', message);
+          setIsProcessing(false);
+          return { success: false, error: message };
+        }
 
         await refreshStorageSummary();
         showNotification('success', 'Photo uploaded. Case is now awaiting coordinator approval.');
@@ -464,16 +489,15 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
       const c = cases.find((item) => item.id === caseId);
       if (!c) return { success: false, error: 'Case not found' };
 
-      if (!c.photoUploaded) {
-        showNotification('error', 'Cannot approve: Bed photo has not been uploaded yet.');
-        return { success: false, error: 'Photo required prior to approval.' };
+      if (!canApproveBedPhoto(c.status, c.photoUploaded)) {
+        showNotification('error', 'Only a bed awaiting coordinator review with an uploaded synthetic photo can be approved.');
+        return { success: false, error: 'The case is not ready for photo approval.' };
       }
 
       setIsProcessing(true);
       try {
         const nowIso = new Date().toISOString();
-        const retentionHours = settings.approvedPhotoRetentionHours || 48;
-        const expiresAt = new Date(Date.now() + retentionHours * 60 * 60 * 1000).toISOString();
+        const expiresAt = new Date(Date.now() + 48 * 60 * 60 * 1000).toISOString();
 
         if (!profile?.facilityId) throw new Error('No facility photo-storage session is available.');
         const updateRes = await cloudPhotoStorage.updateExpiryAndStatus(profile.facilityId, caseId, expiresAt, 'approved');
@@ -491,7 +515,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
           details: `Case Ref: ${c.caseRef} | Ward: ${c.ward} | Bed: ${c.bed} | Status: Bed Ready | Approver: Coordinator | Expiry: 48h scheduled deletion`,
         };
 
-        updateCases((prev) =>
+        const saved = await updateCases((prev) =>
           prev.map((item) => {
             if (item.id !== caseId) return item;
             return {
@@ -504,6 +528,20 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
           })
         );
+        if (!saved) {
+          const rollback = await cloudPhotoStorage.updateExpiryAndStatus(
+            profile.facilityId,
+            caseId,
+            c.photoExpiresAt ?? new Date(Date.now() + (settings.pendingPhotoExpiryDays || 7) * 86400000).toISOString(),
+            'pending',
+          );
+          const message = rollback.success
+            ? 'Case approval could not be saved; the photo was restored to pending review. Please retry approval.'
+            : `Case approval could not be saved and photo metadata could not be restored: ${rollback.error ?? 'Storage error.'}`;
+          showNotification('error', message);
+          setIsProcessing(false);
+          return { success: false, error: message };
+        }
 
         await refreshStorageSummary();
         showNotification('success', `Bed ${c.bed} marked Bed Ready! Photo retention scheduled for 48h.`);
@@ -516,7 +554,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [cases, profile?.facilityId, settings.approvedPhotoRetentionHours, showNotification, updateCases, refreshStorageSummary]
+    [cases, profile?.facilityId, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 8. Coordinator Requests Re-clean / Rejects Photo
@@ -528,12 +566,18 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     ): Promise<{ success: boolean; error?: string }> => {
       const c = cases.find((item) => item.id === caseId);
       if (!c) return { success: false, error: 'Case not found' };
+      if (!canRejectBedPhoto(c.status, c.photoUploaded, reason)) {
+        showNotification('error', 'A bed photo awaiting coordinator review and a rejection reason are required.');
+        return { success: false, error: 'The case is not ready for re-clean review.' };
+      }
 
       setIsProcessing(true);
       try {
         const nowIso = new Date().toISOString();
 
         if (!profile?.facilityId) throw new Error('No facility photo-storage session is available.');
+        const rejectedPhoto = await cloudPhotoStorage.getPhoto(profile.facilityId, caseId);
+        if (!rejectedPhoto) throw new Error('The uploaded photo could not be found for the re-clean request.');
         const delRes = await cloudPhotoStorage.deletePhoto(profile.facilityId, caseId);
         if (!delRes.success) {
           setIsProcessing(false);
@@ -560,7 +604,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
           details: details ? `Notes: ${details}` : undefined,
         };
 
-        updateCases((prev) =>
+        const saved = await updateCases((prev) =>
           prev.map((item) => {
             if (item.id !== caseId) return item;
             return {
@@ -576,6 +620,23 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
           })
         );
+        if (!saved) {
+          const restored = await cloudPhotoStorage.savePhoto(
+            profile.facilityId,
+            caseId,
+            rejectedPhoto.blob,
+            rejectedPhoto.mimeType,
+            c.photoExpiresAt ?? new Date(Date.now() + (settings.pendingPhotoExpiryDays || 7) * 86400000).toISOString(),
+            'pending',
+          );
+          const message = restored.success
+            ? 'Case save failed; the rejected photo has been restored. Please retry the re-clean request.'
+            : `Case save failed and photo restoration failed: ${restored.error ?? 'Storage error.'}`;
+          await refreshStorageSummary();
+          showNotification('error', message);
+          setIsProcessing(false);
+          return { success: false, error: message };
+        }
 
         await refreshStorageSummary();
         showNotification(
@@ -591,7 +652,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         return { success: false, error: msg };
       }
     },
-    [cases, profile?.facilityId, showNotification, updateCases, refreshStorageSummary]
+    [cases, profile?.facilityId, settings.pendingPhotoExpiryDays, showNotification, updateCases, refreshStorageSummary]
   );
 
   // 9. Demo-only Control: Delete Photo Now (Test 48h Retention Policy Immediately)
@@ -620,7 +681,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
           summary: 'Photo permanently purged via demo retention control. Bed Ready approval notice preserved.',
         };
 
-        updateCases((prev) =>
+        const saved = await updateCases((prev) =>
           prev.map((item) => {
             if (item.id !== caseId) return item;
             return {
@@ -631,6 +692,13 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
             };
           })
         );
+        if (!saved) {
+          const message = 'The photo was deleted, but its purge record could not be saved.';
+          await refreshStorageSummary();
+          showNotification('error', message);
+          setIsProcessing(false);
+          return { success: false, error: message };
+        }
 
         await refreshStorageSummary();
         showNotification(
@@ -664,7 +732,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         if (errors.length > 0) showNotification('error', `Fast-forward purge error: ${errors[0]}`);
 
         if (purgedCaseIds.length > 0) {
-          updateCases((prev) =>
+          const saved = await updateCases((prev) =>
             prev.map((c) => {
               if (!purgedCaseIds.includes(c.id)) return c;
               const isPending = c.status === 'AWAITING_REVIEW';
@@ -689,6 +757,12 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
               };
             })
           );
+          if (!saved) {
+            const message = 'Expired photos were deleted, but the case records could not be updated.';
+            await refreshStorageSummary();
+            showNotification('error', message);
+            return { purgedCount: 0, error: message };
+          }
         }
 
         await refreshStorageSummary();
@@ -708,7 +782,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
 
   // 11. Update Settings
   const updateSettings = useCallback((newSettings: Partial<WorkflowSettings>) => {
-    setSettings((prev) => ({ ...prev, ...newSettings }));
+    setSettings((prev) => ({ ...prev, ...newSettings, approvedPhotoRetentionHours: 48 }));
   }, [setSettings]);
 
   // 12. Reset to Initial Demo Data
@@ -738,7 +812,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
         .map((item) => cloudPhotoStorage.deletePhoto(profile.facilityId, item.id)));
       const deletionError = deletions.find((result) => !result.success)?.error;
       if (deletionError) throw new Error(`Could not clear the current bed cases' photos: ${deletionError}`);
-      setCases(freshCases);
+      await mutateCases(() => ({ next: freshCases, result: undefined }));
       setActiveCaseId(freshCases[0].id);
 
       await refreshStorageSummary();
@@ -749,7 +823,7 @@ export const HospitalFlowProvider: React.FC<{ children: React.ReactNode }> = ({ 
     } finally {
       setIsProcessing(false);
     }
-  }, [cases, profile?.facilityId, profile?.role, refreshStorageSummary, setCases, showNotification]);
+  }, [cases, mutateCases, profile?.facilityId, profile?.role, refreshStorageSummary, showNotification]);
 
   return (
     <HospitalFlowContext.Provider

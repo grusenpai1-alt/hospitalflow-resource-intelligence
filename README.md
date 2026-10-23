@@ -34,7 +34,7 @@ HospitalFlow is a responsive operational prototype designed for hospital room-tu
 ## 3. Exact Windows Steps to Run Locally
 
 ### Prerequisites
-- Node.js 20.19+ or 22.12+
+- Node.js 22.12+ (Node.js 24.21.0 was used for the checks reported below)
 - Windows PowerShell or Command Prompt
 
 ### Step-by-Step Instructions
@@ -88,6 +88,8 @@ HospitalFlow is a responsive operational prototype designed for hospital room-tu
 
 For a Vercel build, add the same `VITE_FIREBASE_*` values as project environment variables before deployment. Without them, the deployed app remains on the Firebase setup gate. Never add service-account credentials or other privileged keys to Vite variables.
 
+Run focused rules tests with `npm test`. The test script uses Node's built-in TypeScript stripping, so use Node.js 22.12 or newer.
+
 ---
 
 ## 4. Manual Walkthrough & Workflow Verification
@@ -102,7 +104,7 @@ For a Vercel build, add the same `VITE_FIREBASE_*` values as project environment
 4. **Housekeeping Cleaning & Photo Upload:**
    - Under Step 3, note the prominent **Privacy Reminder Banner** (*"Frame only the room/bed area. Never photograph patients, healthcare workers, medical records, or screens"*).
    - Click **`Start Bed Sanitisation`**.
-   - Either click **`Capture / Upload Bed Photo`** to select an image from your device, or click **`Use Synthetic Room Photo (Demo)`** to generate an illustrative image and upload it to Firebase Storage.
+   - Select a **synthetic demo image** or click **`Use Synthetic Room Photo (Demo)`** to generate an illustrative image and upload it to Firebase Storage. Do not use a real hospital photograph.
 5. **Coordinator Review:**
    - The case transitions to **Awaiting Coordinator Approval**.
    - Review the photo preview loaded from Firebase Storage, the capture timestamp, and the pending-review expiry countdown.
@@ -134,13 +136,31 @@ For a Vercel build, add the same `VITE_FIREBASE_*` values as project environment
 
 ---
 
-## 5. Scope & Remaining Production Needs
+## 5. End-to-End Workflow Walkthroughs
+
+All workflow records below are synthetic and stored under the signed-in facility's Firestore workflow documents. The app does not sync with hospital systems. Directly open any route listed here or select it from the workflow navigation.
+
+1. **Lab availability (`/labs`)** — Choose an instrument, test, future date/time, and requesting department; reserve the slot. A conflicting reservation is rejected with the next available slot. Cancel a listed reservation to release it.
+2. **Equipment booking (`/equipment`)** — Select equipment and a time range to create a booking; overlapping bookings and active outage windows are rejected. Cancel bookings from the selected-date list. Report an outage with a reason and start/end time, then restore it when service is available. Utilization is shown against the displayed date's 08:00–16:00 shift hours after outages.
+3. **Clinic beds (`/beds`)** — Create a synthetic case; complete required handoffs; confirm departure; start cleaning; submit only a synthetic image (JPEG, PNG, or WebP, up to 10 MB) or generate one; then approve or request re-clean with a reason. Pending images use the configured expiry (7 days by default); approved images use a fixed 48-hour expiry. The browser-triggered purge and Firebase Storage deletion are not a guaranteed server-side retention schedule.
+4. **Bed occupancy (`/occupancy`)** — Move a bed from occupied to cleaning, assign an on-shift crew member not assigned elsewhere, finish cleaning, and approve readiness. Coordinators can request re-clean with a reason. The board records status activity and updates capacity counts.
+5. **Health camp (`/camps`)** — Allocate synthetic resource units. At 80% capacity the interface warns; an allocation above the 120-unit capacity is rejected without changing totals. Release an allocation to restore capacity.
+6. **Emergency pharmacy (`/pharmacy`)** — Search or filter supplies; record a signed whole-unit adjustment with a reason. Negative resulting stock is blocked. Low/critical state, last-updated time, and recent synthetic adjustment history recalculate from saved stock.
+7. **Trauma readiness (`/trauma`)** — Advance bays through use and cleaning. Mark a bay unavailable only with an operational reason, and restore it when ready. Readiness counts and update time reflect the saved state.
+8. **Doctor schedule (`/clinicians`)** — Filter the synthetic roster by specialty and availability; update a demo status and confirm the filtered availability/on-call counts.
+9. **Staff availability (`/staff`)** — Filter departments by coverage gap or covered status; change synthetic on-duty counts within each planned requirement and review totals and coverage percentages.
+10. **General alerts (`/alerts`)** — Filter by severity and acknowledgement state; acknowledge one alert or all active alerts. Saved timestamps and the summary update; repeating an acknowledgement is idempotent.
+11. **Blood bank (`/blood-bank`)** — Record a reasoned whole-unit receipt or correction. Negative stock is blocked; the saved inventory and recent adjustment history update. Always confirm real availability and compatibility outside this demo.
+12. **Ambulance arrivals (`/ambulance`)** — Progress a synthetic arrival from inbound to arrived and handover complete. A completed handover cannot advance again; the saved timestamp and counts update.
+13. **Isolation rooms (`/infection-control`)** — Progress synthetic rooms from available to occupied, cleaning, and available. Room counts and last-updated timestamps change with each valid transition. These statuses do not represent clinical clearance.
+
+## 6. Scope & Remaining Production Needs
 
 The `/occupancy` workspace includes a synthetic ward bed board, occupancy metrics, cleaning crew assignment, cleaning completion, readiness review/re-clean transitions, and a recent activity feed. Changes are stored in the same facility-scoped Firestore workflow store as the other scenarios.
 
 Current limitations include coarse facility-wide write access for non-viewer roles (the UI role controls are not server authorization), synthetic/demo crew records, no staff/bed directory synchronization, and client-triggered photo retention checks. These workflows are not connected to a hospital information system or verified clinical source of truth.
 
-## 6. Architecture, Privacy & Integration Readiness
+## 7. Architecture, Privacy & Integration Readiness
 
 Repository reconnaissance, current limitations, and a staged path toward secure backend and ABDM sandbox work are documented in [`docs/architecture-assessment.md`](./docs/architecture-assessment.md), [`docs/security-and-privacy.md`](./docs/security-and-privacy.md), and the other readiness documents under [`docs/`](./docs/).
 

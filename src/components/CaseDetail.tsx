@@ -475,7 +475,6 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                     id="camera-file-input"
                     type="file"
                     accept="image/jpeg,image/png,image/webp"
-                    capture="environment"
                     className="visually-hidden"
                     onChange={handleFileUpload}
                     disabled={!canHousekeep || isProcessing || caseData.status === 'BED_READY'}
@@ -491,8 +490,8 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                       <Camera className="btn-icon" />
                       <span>
                         {caseData.photoUploaded
-                          ? 'Upload Replacement Photo'
-                          : 'Capture / Upload Bed Photo'}
+                          ? 'Select Synthetic Replacement Image'
+                          : 'Select Synthetic Bed Image'}
                       </span>
                     </label>
 
@@ -510,7 +509,7 @@ export const CaseDetail: React.FC<CaseDetailProps> = ({ caseData }) => {
                   </div>
 
                   <span className="file-limits-caption">
-                    JPEG, PNG, or WebP • Max 10MB • Stored in access-controlled facility Firebase Storage
+                    Synthetic JPEG, PNG, or WebP only • Max 10MB • Stored in access-controlled facility Firebase Storage
                   </span>
                 </div>
               </div>
